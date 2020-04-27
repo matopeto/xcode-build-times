@@ -21,6 +21,7 @@ final class Config
 
     const DATA_FILE_NAME = "buildTimes.csv";
     const START_TIME_FILE = "buildStartTime";
+    const DATA_FILE_DIR = ".xcodeBuildTimes"; // Must be hidden (start with ".")
 }
 
 final class Strings
@@ -56,8 +57,13 @@ final class Strings
 }
 
 $scriptDirectory = realpath(__DIR__);
-$dataFilePath = $scriptDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_NAME;
-$startTimeFilePath = $scriptDirectory . DIRECTORY_SEPARATOR . Config::START_TIME_FILE;
+$dataDirectory = $scriptDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_DIR;
+$dataFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_NAME;
+$startTimeFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::START_TIME_FILE;
+
+if (!file_exists($dataDirectory)) {
+    mkdir($dataDirectory);
+}
 
 $idAlertMessage = getenv("IDEAlertMessage");
 $arg = $argc > 1 ? $argv[1] : null;
