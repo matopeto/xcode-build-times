@@ -498,7 +498,7 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     $workspace = $workspace === false ? "" : $workspace;
 
     $project = getenv("XcodeProject");
-    $project = $project === false ? "" : $workspace;
+    $project = $project === false ? "" : $project;
 
     if ($duration < 0) {
         exit("File $startTimeFilePath has invalid format");
