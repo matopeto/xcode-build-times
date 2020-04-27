@@ -53,3 +53,7 @@ and succeeds
 The script is called `xcodeBuildTimes.1m.php` so BitBar will refresh the data every minute. If you want to use a different refresh interval, just change the `1m` in the script name yo your desired interval. 
 
 You can find [more info about the refresh intervals in the BitBar documentation](https://github.com/matryer/bitbar#configure-the-refresh-time).
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
