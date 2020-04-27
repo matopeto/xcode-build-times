@@ -27,7 +27,6 @@ final class Strings
     const WARNING_UNABLE_TO_READ_DATA_FILE = "Unable to read data file";
     const WARNING_PROBLEM_WITH_DATA_FILE = "There is some problem with data";
     const WARNING_NO_DATA = "No data";
-    const WARNING_NO_DATA_FOR_TODAY = "No data for today";
     const ROW_WARNING = ":warning: %s"; // %s will be replaced by warning message
 
     const ROE_HEADER_TODAY = "Today";
@@ -134,9 +133,7 @@ final class BuildTimesFileParser
             // Today rows
             // Get today
             $todayKey = (new DateTime())->format("Y-m-d");
-            if (!key_exists($todayKey, $rows)) {
-                $result->warnings[] = Strings::WARNING_NO_DATA_FOR_TODAY;
-            } else {
+            if (key_exists($todayKey, $rows)) {
                 // Today data
                 $todayRows = $rows[$todayKey];
                 $result->todayData = $this->getData($todayRows);
@@ -268,10 +265,8 @@ final class BitBarRenderer
     private function renderHeader()
     {
         $row = "";
-        $buildTime = @$this->data->todayData->buildTime;
-        if ($buildTime !== null) {
-            $row .= $this->format($buildTime);
-        }
+        $buildTime = @$this->data->todayData->buildTime ?: 0;
+        $row .= $this->format($buildTime);
 
         if (count($this->data->warnings) > 0) {
             $row .= " :warning:";
