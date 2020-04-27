@@ -5,7 +5,8 @@
 # <bitbar.version>v1.0</bitbar.version>
 # <bitbar.author>Mato Peto</bitbar.author>
 # <bitbar.author.github>mato-peto</bitbar.author.github>
-# <bitbar.desc>Shows todays and total time you spend waiting to Xcode finish building.</bitbar.desc>
+# <bitbar.desc>Shows today's and total time you spend waiting to Xcode finish building.</bitbar.desc>
+# <bitbar.image>https://raw.githubusercontent.com/matopeto/xcode-build-times/master/screenshots/menubar-extended.png</bitbar.image>
 # <bitbar.dependencies>php,xcode</bitbar.dependencies>
 # <bitbar.abouturl>https://github.com/matopeto/xcode-build-timese</bitbar.abouturl>
 
