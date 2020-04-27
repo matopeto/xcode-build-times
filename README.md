@@ -16,7 +16,7 @@ This script works as a [BitBar](https://getbitbar.com/) plugin so you need to in
 brew cask install bitbar
 ```
 
-On the first run select a directory you wish to use aj your plugin directory, for example `~/BitBarPlugins`.
+On the first run select a directory you wish to use as your plugin directory, for example `~/BitBarPlugins`.
 
 ### Plugin installation
 
