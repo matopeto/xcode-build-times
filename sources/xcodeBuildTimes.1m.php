@@ -424,8 +424,10 @@ final class BitBarRenderer
             return "{$seconds}s";
         } else if ($seconds < 3600) {
             return $interval->format("%im %ss");
-        } else {
+        } elseif ($seconds < 86400) {
             return $interval->format("%hh %im");
+        } else {
+            return $interval->format("%ad %hh");
         }
     }
 }
