@@ -56,10 +56,13 @@ final class Strings
     const MSG_NO_BUILDS_YET = "no builds yet";
 }
 
+$buildHash = getBuildHash();
+
 $scriptDirectory = realpath(__DIR__);
 $dataDirectory = $scriptDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_DIR;
 $dataFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_NAME;
-$startTimeFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::START_TIME_FILE;
+$startTimeFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::START_TIME_FILE . "." . $buildHash;
+
 
 if (!file_exists($dataDirectory)) {
     mkdir($dataDirectory);
@@ -488,6 +491,7 @@ function markStart($startTimeFilePath)
 function markEnd($type, $startTimeFilePath, $dataFilePath)
 {
     $content = file_get_contents($startTimeFilePath);
+    unlink($startTimeFilePath);
     if ($content === false) {
         exit("Unable to open file: $startTimeFilePath");
     }
@@ -524,4 +528,19 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     fputcsv($handle, $data, ",");
 
     fclose($handle);
+}
+
+function getBuildHash()
+{
+    $buildHash = "";
+    $workspacePath = getenv("XcodeWorkspacePath");
+    if ($workspacePath !== false) {
+        $buildHash .= $workspacePath;
+    }
+    $projectPath = getenv("XcodeProjectPath");
+    if ($projectPath !== false) {
+        $buildHash .= $projectPath;
+    }
+
+    return md5($buildHash);
 }
