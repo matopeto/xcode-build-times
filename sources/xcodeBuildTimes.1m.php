@@ -494,17 +494,17 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
 
     $duration = time() - $startTime;
 
+    if ($duration < 0 || $startTime === 0) {
+        exit("File $startTimeFilePath has invalid format");
+        // Invalid duration
+        return;
+    }
+
     $workspace = getenv("XcodeWorkspace");
     $workspace = $workspace === false ? "" : $workspace;
 
     $project = getenv("XcodeProject");
     $project = $project === false ? "" : $project;
-
-    if ($duration < 0) {
-        exit("File $startTimeFilePath has invalid format");
-        // Invalid duration
-        return;
-    }
 
     $data = [
         date("Y-m-d H:i:s"),
