@@ -43,6 +43,10 @@ final class Strings
     const ROW_SUCCESS_BUILD_TIME = 'Success: %s'; // %s will be replaced with corresponding build time
     const ROW_FAIL_BUILD_TIME = 'Fail: %s'; // %s will be replaced with corresponding build time
 
+    const ROW_DAILY_AVERAGE_BUILD_TIME = 'Daily average: %1$s, %2$s builds'; // // %1$s will be replaced with corresponding build time, %1$s with build counts
+    const ROW_DAILY_SUCCESS_BUILD_TIME = 'Success: %1$s, %2$s builds'; // %1$s will be replaced with corresponding build time, %1$s with build counts
+    const ROW_DAILY_FAIL_BUILD_TIME = 'Fail: %1$s, %2$s builds'; // %1$s will be replaced with corresponding build time, %1$s with build counts
+
     const ROW_LAST_BUILD = 'Last build: %1$s, %2$s'; // %1$d will be replaced with status (success/fail) %2$d with duration
 
     const ROW_REFRESH = "Refresh";
@@ -147,6 +151,44 @@ final class BuildTimesFileParser
                 // Today data
                 $todayRows = $rows[$todayKey];
                 $result->todayData = $this->getData($todayRows);
+            }
+
+            // Daily data
+            $days = 0;
+            $bt = 0;
+            $sbt = 0;
+            $fbt = 0;
+            $bc = 0;
+            $sbc = 0;
+            $fbc = 0;
+            foreach ($rows as $key => $data) {
+                // Count only past days
+                if ($key >= $todayKey) {
+                    continue;
+                }
+
+                $dayData = $this->getData($data);
+                $days++;
+                $bt += $dayData->buildTime;
+                $sbt += $dayData->successBuildTime;
+                $fbt += $dayData->failBuildTime;
+                $bc += $dayData->buildCount;
+                $sbc += $dayData->successCount;
+                $fbc += $dayData->failCount;
+            }
+
+            if ($days > 0) {
+                $dailyData = new DailyTimesData();
+                $dailyData->days = $days;
+                $dailyData->averageBuildTime = intval($bt / $days);
+                $dailyData->averageSuccessBuildTime = intval($sbt / $days);
+                $dailyData->averageFailBuildTime = intval($fbt / $days);
+
+                $dailyData->averageBuildCount = intval($bc / $days);
+                $dailyData->averageSuccessCount = intval($sbc / $days);
+                $dailyData->averageFailCount = intval($fbc / $days);
+
+                $result->dailyData = $dailyData;
             }
         }
 
@@ -301,6 +343,7 @@ final class BitBarRenderer
         // Today and on alt total info
         $todayData = $this->data->todayData;
         $totalData = $this->data->totalData;
+        $dailyData = $this->data->dailyData;
 
         $alternate = "| alternate=true";
         $rows[] = Strings::ROE_HEADER_TODAY;
@@ -339,6 +382,13 @@ final class BitBarRenderer
         $rows[] = "-- " . $this->getFormatedTimeRow($totalData, "averageSuccessBuildTime", Strings::ROW_SUCCESS_BUILD_TIME) . $alternate;
         $rows[] = "-- " . $this->getFormatedTimeRow($todayData, "averageFailBuildTime", Strings::ROW_FAIL_BUILD_TIME);
         $rows[] = "-- " . $this->getFormatedTimeRow($totalData, "averageFailBuildTime", Strings::ROW_FAIL_BUILD_TIME) . $alternate;
+
+        if ($dailyData !== null) {
+            $rows[] = sprintf(Strings::ROW_DAILY_AVERAGE_BUILD_TIME, $this->format($dailyData->averageBuildTime), $dailyData->averageBuildCount);
+            $rows[] = "-- " . sprintf(Strings::ROW_DAILY_SUCCESS_BUILD_TIME, $this->format($dailyData->averageSuccessBuildTime), $dailyData->averageSuccessCount);
+            $rows[] = "-- " . sprintf(Strings::ROW_DAILY_FAIL_BUILD_TIME, $this->format($dailyData->averageFailBuildTime), $dailyData->averageFailCount);
+
+        }
 
         if ($this->data->lastBuild !== null) {
             $rows[] = "---";
@@ -441,6 +491,8 @@ final class BuildTimesOutput
     var $todayData;
     /** @var BuildTimesData */
     var $totalData;
+    /** @var DailyTimesData */
+    var $dailyData;
     /** @var DataRow */
     var $lastBuild;
     /** @var string[] */
@@ -471,6 +523,24 @@ final class BuildTimesData
     var $dataFrom;
     /** @var DateTime */
     var $dataTo;
+}
+
+final class DailyTimesData
+{
+    /** @var int */
+    var $days;
+    /** @var int */
+    var $averageBuildCount;
+    /** @var int */
+    var $averageSuccessCount;
+    /** @var int */
+    var $averageFailCount;
+    /** @var int */
+    var $averageBuildTime;
+    /** @var int */
+    var $averageSuccessBuildTime;
+    /** @var int */
+    var $averageFailBuildTime;
 }
 
 final class DataRow
