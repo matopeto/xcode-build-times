@@ -17,11 +17,15 @@ final class Config
 
     const ABOUT_URL = "https://github.com/matopeto/xcode-build-times";
 
+    const UPDATE_URL = "https://raw.githubusercontent.com/matopeto/xcode-build-times/master/sources/xcodeBuildTimes.1m.php";
+    const UPDATE_USER_AGENT = "matopeto/xcode-build-times";
+
     const DATE_FORMAT = "Y-m-d";
 
     const DATA_FILE_NAME = "buildTimes.csv";
     const START_TIME_FILE = "buildStartTime";
     const DATA_FILE_DIR = ".xcodeBuildTimes"; // Must be hidden (start with ".")
+    const UPDATE_TMP_FILE = ".newVersion";
 }
 
 final class Strings
@@ -56,6 +60,9 @@ final class Strings
     const ROW_ABOUT_RESET = "Reset";
     const ROW_ABOUT_RESET_REALLY = "Really?";
     const ROW_ABOUT_RESET_REALLY_YES = "Yes";
+    const ROW_ABOUT_UPDATE = "Update";
+    const ROW_ABOUT_UPDATE_REALLY = "Really?";
+    const ROW_ABOUT_UPDATE_REALLY_YES = "Yes";
 
     const MSG_NO_BUILDS_YET = "no builds yet";
 }
@@ -86,6 +93,9 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
     die;
 } elseif ($arg === "reset") {
     unlink($dataFilePath);
+    die;
+} elseif ($arg === "update") {
+    update($dataDirectory);
     die;
 }
 
@@ -450,6 +460,9 @@ final class BitBarRenderer
         $rows[] = "-- " . Strings::ROW_ABOUT_RESET;
         $rows[] = "---- " . Strings::ROW_ABOUT_RESET_REALLY;
         $rows[] = "------ " . Strings::ROW_ABOUT_RESET_REALLY_YES . "| bash='" . __FILE__ . "' param1=reset refresh=true terminal=false";
+        $rows[] = "-- " . Strings::ROW_ABOUT_UPDATE;
+        $rows[] = "---- " . Strings::ROW_ABOUT_UPDATE_REALLY;
+        $rows[] = "------ " . Strings::ROW_ABOUT_UPDATE_REALLY_YES . "| bash='" . __FILE__ . "' param1=update refresh=true terminal=false";
 
         $this->renderRows($rows);
     }
@@ -613,4 +626,40 @@ function getBuildHash()
     }
 
     return md5($buildHash);
+}
+
+function update($where) {
+    $options = array(
+        'http'=>array(
+            'method'=>"GET",
+            'headers'=> [
+                "User-Agent: " . Config::UPDATE_USER_AGENT,
+            ]
+        )
+    );
+
+    $data = file_get_contents(Config::UPDATE_URL, false, stream_context_create($options));
+    if ($data === false) {
+        exit("Unable to download update file from: " . Config::UPDATE_URL);
+    }
+
+    $updateFile = $where . DIRECTORY_SEPARATOR . Config::UPDATE_TMP_FILE;
+    $result = file_put_contents($updateFile, $data);
+    if ($result === false) {
+        exit("Unable to write update file to: " . $updateFile);
+    }
+
+    if ($result !== strlen($data)) {
+        exit("Unable to write update file to: " . $updateFile);
+    }
+
+    $result = chmod($updateFile, 0755);
+    if ($result === false) {
+        exit("Unable change permission of $updateFile to 0755");
+    }
+
+    $result = rename($updateFile, __FILE__);
+    if ($result === false) {
+        exit("Unable to rename $updateFile to " . __FILE__);
+    }
 }
