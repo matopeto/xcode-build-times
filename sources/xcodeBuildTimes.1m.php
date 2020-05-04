@@ -79,7 +79,6 @@ $dataDirectory = $scriptDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_DIR;
 $dataFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_NAME;
 $startTimeFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::START_TIME_FILE . "." . $buildHash;
 
-
 if (!file_exists($dataDirectory)) {
     mkdir($dataDirectory);
 }
@@ -100,7 +99,8 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
     unlink($dataFilePath);
     die;
 } elseif ($arg === "update") {
-    update($dataDirectory);
+    $showAlerts = $argc > 2 && $argv[2] == "showAlerts";
+    update($dataDirectory, $showAlerts);
     die;
 }
 
@@ -467,7 +467,7 @@ final class BitBarRenderer
         $rows[] = "------ " . Strings::ROW_ABOUT_RESET_REALLY_YES . "| bash='" . __FILE__ . "' param1=reset refresh=true terminal=false";
         $rows[] = "-- " . Strings::ROW_ABOUT_UPDATE;
         $rows[] = "---- " . Strings::ROW_ABOUT_UPDATE_REALLY;
-        $rows[] = "------ " . Strings::ROW_ABOUT_UPDATE_REALLY_YES . "| bash='" . __FILE__ . "' param1=update refresh=true terminal=false";
+        $rows[] = "------ " . Strings::ROW_ABOUT_UPDATE_REALLY_YES . "| bash='" . __FILE__ . "' param1=update param2=showAlerts refresh=true terminal=false";
 
         $this->renderRows($rows);
     }
@@ -581,7 +581,8 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     $content = @file_get_contents($startTimeFilePath);
     unlink($startTimeFilePath);
     if ($content === false) {
-        exit("Unable to open file: $startTimeFilePath");
+        error_log("Unable to open file: $startTimeFilePath");
+        exit(1);
     }
 
     $startTime = intval($content);
@@ -589,9 +590,8 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     $duration = time() - $startTime;
 
     if ($duration < 0 || $startTime === 0) {
-        exit("File $startTimeFilePath has invalid format");
-        // Invalid duration
-        return;
+        error_log("File $startTimeFilePath has invalid format");
+        exit(1);
     }
 
     $workspace = getenv("XcodeWorkspace");
@@ -610,7 +610,8 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
 
     $handle = @fopen($dataFilePath, "a");
     if ($handle === false) {
-        exit("Unable to open file: $dataFilePath");
+        error_log("Unable to open file: $dataFilePath");
+        exit(1);
     }
 
     fputcsv($handle, $data, ",");
@@ -633,7 +634,7 @@ function getBuildHash()
     return md5($buildHash);
 }
 
-function update($where) {
+function update($where, $showAlerts) {
     $options = array(
         'http'=>array(
             'method'=>"GET",
@@ -646,8 +647,11 @@ function update($where) {
     $data = @file_get_contents(Config::UPDATE_URL, false, stream_context_create($options));
 
     if ($data === false) {
-        showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
-        exit("Unable to download update file from: " . Config::UPDATE_URL);
+        error_log("Unable to download update file from: " . Config::UPDATE_URL);
+        if ($showAlerts) {
+            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
+        }
+        exit(1);
     }
 
     $selfData = @file_get_contents(__FILE__, false);
@@ -657,40 +661,59 @@ function update($where) {
         $hash2 = hash("sha256", $selfData);
         if ($hash1 === $hash2) {
             // Show alert message:
-            showAlert(Strings::UPDATE_ALERT_NO_UPDATES_MESSAGE);
-            exit("No update available.");
+            error_log("No update available.");
+            if ($showAlerts) {
+                showAlert(Strings::UPDATE_ALERT_NO_UPDATES_MESSAGE);
+            }
+            exit(1);
         }
     }
 
     $updateFile = $where . DIRECTORY_SEPARATOR . Config::UPDATE_TMP_FILE;
     $result = @file_put_contents($updateFile, $data);
     if ($result === false) {
-        showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
-        exit("Unable to write update file to: " . $updateFile);
+        error_log("Unable to write update file to: " . $updateFile);
+        if ($showAlerts) {
+            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
+        }
+        exit(1);
     }
 
     if ($result !== strlen($data)) {
-        showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
-        exit("Unable to write update file to: " . $updateFile);
+        error_log("Unable to write update file to: " . $updateFile);
+        if ($showAlerts) {
+            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
+        }
+        exit(1);
     }
 
     $result = chmod($updateFile, 0755);
     if ($result === false) {
-        showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
-        exit("Unable change permission of $updateFile to 0755");
+        error_log("Unable change permission of $updateFile to 0755");
+        if ($showAlerts) {
+            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
+        }
+        exit(1);
     }
 
     $result = rename($updateFile, __FILE__);
     if ($result === false) {
-        showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
-        exit("Unable to rename $updateFile to " . __FILE__);
+        error_log("Unable to rename $updateFile to " . __FILE__);
+        if ($showAlerts) {
+            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
+        }
+        exit(1);
     }
 
     // Show alert message
-    showAlert(Strings::UPDATE_ALERT_SUCCESS_MESSAGE);
+    echo "Update successful";
+    if ($showAlerts) {
+        showAlert(Strings::UPDATE_ALERT_SUCCESS_MESSAGE);
+    }
+    exit(0);
 }
 
 function showAlert($message) {
-    $command = "osascript -e " . escapeshellarg('display alert "' . str_replace('"', '\"', Strings::UPDATE_ALERT_TITLE) . '" message "' . str_replace('"', '\"', $message) . '"');
+    $command = "osascript -e " . escapeshellarg('display alert "' . str_replace('"', '\"', Strings::UPDATE_ALERT_TITLE) . '" message "' . str_replace('"', '\"', $message) . '"') . "> /dev/null 2>&1 &";
     exec($command);
 }
