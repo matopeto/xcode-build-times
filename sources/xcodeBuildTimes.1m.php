@@ -65,6 +65,11 @@ final class Strings
     const ROW_ABOUT_UPDATE_REALLY_YES = "Yes";
 
     const MSG_NO_BUILDS_YET = "no builds yet";
+
+    const UPDATE_ALERT_TITLE = "Xcode build times";
+    const UPDATE_ALERT_SUCCESS_MESSAGE = "Plugin was updated successfully.";
+    const UPDATE_ALERT_FAIL_MESSAGE = "Unable to update.";
+    const UPDATE_ALERT_NO_UPDATES_MESSAGE = "No updates available.";
 }
 
 $buildHash = getBuildHash();
@@ -568,12 +573,12 @@ final class DataRow
 
 function markStart($startTimeFilePath)
 {
-    file_put_contents($startTimeFilePath, "" . time());
+    @file_put_contents($startTimeFilePath, "" . time());
 }
 
 function markEnd($type, $startTimeFilePath, $dataFilePath)
 {
-    $content = file_get_contents($startTimeFilePath);
+    $content = @file_get_contents($startTimeFilePath);
     unlink($startTimeFilePath);
     if ($content === false) {
         exit("Unable to open file: $startTimeFilePath");
@@ -638,28 +643,54 @@ function update($where) {
         )
     );
 
-    $data = file_get_contents(Config::UPDATE_URL, false, stream_context_create($options));
+    $data = @file_get_contents(Config::UPDATE_URL, false, stream_context_create($options));
+
     if ($data === false) {
+        showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
         exit("Unable to download update file from: " . Config::UPDATE_URL);
     }
 
+    $selfData = @file_get_contents(__FILE__, false);
+    if ($selfData !== false) {
+        // Compare hash
+        $hash1 = hash("sha256", $data);
+        $hash2 = hash("sha256", $selfData);
+        if ($hash1 === $hash2) {
+            // Show alert message:
+            showAlert(Strings::UPDATE_ALERT_NO_UPDATES_MESSAGE);
+            exit("No update available.");
+        }
+    }
+
     $updateFile = $where . DIRECTORY_SEPARATOR . Config::UPDATE_TMP_FILE;
-    $result = file_put_contents($updateFile, $data);
+    $result = @file_put_contents($updateFile, $data);
     if ($result === false) {
+        showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
         exit("Unable to write update file to: " . $updateFile);
     }
 
     if ($result !== strlen($data)) {
+        showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
         exit("Unable to write update file to: " . $updateFile);
     }
 
     $result = chmod($updateFile, 0755);
     if ($result === false) {
+        showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
         exit("Unable change permission of $updateFile to 0755");
     }
 
     $result = rename($updateFile, __FILE__);
     if ($result === false) {
+        showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
         exit("Unable to rename $updateFile to " . __FILE__);
     }
+
+    // Show alert message
+    showAlert(Strings::UPDATE_ALERT_SUCCESS_MESSAGE);
+}
+
+function showAlert($message) {
+    $command = "osascript -e " . escapeshellarg('display alert "' . str_replace('"', '\"', Strings::UPDATE_ALERT_TITLE) . '" message "' . str_replace('"', '\"', $message) . '"');
+    exec($command);
 }
