@@ -640,6 +640,8 @@ function update($where, $showAlerts) {
             'method'=>"GET",
             'headers'=> [
                 "User-Agent: " . Config::UPDATE_USER_AGENT,
+                "Cache-Control: no-cache",
+                "Pragma: no-cache",
             ]
         )
     );
