@@ -22,10 +22,11 @@ final class Config
 
     const DATE_FORMAT = "Y-m-d";
 
-    const DATA_FILE_NAME = "buildTimes.csv";
-    const START_TIME_FILE = "buildStartTime";
     const DATA_FILE_DIR = ".xcodeBuildTimes"; // Must be hidden (start with ".")
-    const UPDATE_TMP_FILE = ".newVersion";
+    const DATA_FILE_NAME = "buildTimes.csv";
+    const START_TIME_FILE_NAME = "buildStartTime";
+    const UPDATE_TMP_FILE_NAME = ".newVersion";
+    const CONFIG_FILE_NAME = "config.json";
 }
 
 final class Strings
@@ -54,12 +55,18 @@ final class Strings
     const ROW_LAST_BUILD = 'Last build: %1$s, %2$s'; // %1$d will be replaced with status (success/fail) %2$d with duration
 
     const ROW_REFRESH = "Refresh";
+
+    const ROW_SETTINGS = "Settings";
+    const ROW_SETTINGS_FILTER = "Filter";
+    const ROW_SETTINGS_FILTER_ALL = "Show all";
+    const ROW_SETTINGS_RESET = "Reset";
+    const ROW_SETTINGS_RESET_REALLY = "Really?";
+    const ROW_SETTINGS_RESET_REALLY_YES = "Yes";
+
+
     const ROW_ABOUT = "About";
     const ROW_ABOUT_ICON = "Icon by Icons8";
     const ROW_ABOUT_SOURCE_CODE = "Source Code & Info";
-    const ROW_ABOUT_RESET = "Reset";
-    const ROW_ABOUT_RESET_REALLY = "Really?";
-    const ROW_ABOUT_RESET_REALLY_YES = "Yes";
     const ROW_ABOUT_UPDATE = "Update";
     const ROW_ABOUT_UPDATE_REALLY = "Really?";
     const ROW_ABOUT_UPDATE_REALLY_YES = "Yes";
@@ -77,7 +84,8 @@ $buildHash = getBuildHash();
 $scriptDirectory = realpath(__DIR__);
 $dataDirectory = $scriptDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_DIR;
 $dataFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_NAME;
-$startTimeFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::START_TIME_FILE . "." . $buildHash;
+$configFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::CONFIG_FILE_NAME;
+$startTimeFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::START_TIME_FILE_NAME . "." . $buildHash;
 
 if (!file_exists($dataDirectory)) {
     mkdir($dataDirectory);
@@ -102,9 +110,12 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
     $showAlerts = $argc > 2 && $argv[2] == "showAlerts";
     update($dataDirectory, $showAlerts);
     die;
+} elseif ($arg === "config") {
+    processConfigChange($argv, $configFilePath);
+    die;
 }
 
-$parser = new BuildTimesFileParser($dataFilePath);
+$parser = new BuildTimesFileParser($dataFilePath, $configFilePath);
 $data = $parser->getOutput();
 $renderer = new BitBarRenderer($data);
 $renderer->render();
@@ -114,13 +125,21 @@ final class BuildTimesFileParser
     /** @var string */
     private $dataFile;
 
+    /** @var string */
+    private $configFile;
+
+    /** @var BuildTimesConfig */
+    private $config;
+
     /**
      * BuildTimesFileParser constructor.
      * @param string $dataFile
+     * @param string $configFile
      */
-    public function __construct($dataFile)
+    public function __construct($dataFile, $configFile)
     {
         $this->dataFile = $dataFile;
+        $this->configFile = $configFile;
     }
 
     /**
@@ -131,6 +150,8 @@ final class BuildTimesFileParser
     {
         $result = new BuildTimesOutput();
 
+        // Read config
+        $this->config = new BuildTimesConfig($this->configFile);
 
         // Read CSV
         $handle = @fopen($this->dataFile, "r");
@@ -138,12 +159,42 @@ final class BuildTimesFileParser
         if ($handle === FALSE) {
             $result->warnings[] = Strings::WARNING_UNABLE_TO_READ_DATA_FILE;
         } else {
-            list($rows, $problemWithData) = $this->parseFile($handle);
+            /**
+             * @var DataRow[][] $rows
+             * @var boolean $problemWithData
+             * @var string[] $workspaces
+             * @var string[] $projects
+             */
+            list($rows, $problemWithData, $workspaces, $projects) = $this->parseFile($handle, $this->config);
             if ($problemWithData) {
                 $result->warnings[] = Strings::WARNING_PROBLEM_WITH_DATA_FILE;
             }
 
-            // All rows
+            $result->workspaces = array_unique(
+                array_filter(
+                    array_merge(
+                        $this->config->selectedWorkspaces,
+                        $workspaces
+                    ),
+                    function ($item) {
+                        return $item !== null && !empty($item);
+                    }
+                ),
+                SORT_STRING);
+
+            $result->projects = array_unique(
+                array_filter(
+                    array_merge(
+                        $this->config->selectedProjects,
+                        $projects
+                    ),
+                    function ($item) {
+                        return $item !== null && !empty($item);
+                    }
+                ),
+                SORT_STRING);
+
+            /** @var DataRow[] $allRows */
             $allRows = array_reduce($rows, function ($all, $item) {
                 return array_merge($all, $item);
             }, []);
@@ -155,7 +206,7 @@ final class BuildTimesFileParser
             if (empty($allRows)) {
                 $result->warnings[] = Strings::WARNING_NO_DATA;
             } else {
-                $result->totalData = $this->getData($allRows);
+                $result->totalData = $this->getData($allRows, $this->config);
                 $result->lastBuild = end($allRows);
             }
 
@@ -165,7 +216,7 @@ final class BuildTimesFileParser
             if (key_exists($todayKey, $rows)) {
                 // Today data
                 $todayRows = $rows[$todayKey];
-                $result->todayData = $this->getData($todayRows);
+                $result->todayData = $this->getData($todayRows, $this->config);
             }
 
             // Daily data
@@ -176,13 +227,14 @@ final class BuildTimesFileParser
             $bc = 0;
             $sbc = 0;
             $fbc = 0;
+
             foreach ($rows as $key => $data) {
                 // Count only past days
                 if ($key >= $todayKey) {
                     continue;
                 }
 
-                $dayData = $this->getData($data);
+                $dayData = $this->getData($data, $this->config);
                 $days++;
                 $bt += $dayData->buildTime;
                 $sbt += $dayData->successBuildTime;
@@ -207,16 +259,22 @@ final class BuildTimesFileParser
             }
         }
 
+        $result->selectedWorkspaces = $this->config->selectedWorkspaces;
+        $result->selectedProjects = $this->config->selectedProjects;
+
         return $result;
     }
 
     /**
      * @param resource $handle
      *
+     * @param BuildTimesConfig $config
      * @return array - array with two values, first is [DataRow], second is boolean
      */
-    private function parseFile($handle)
+    private function parseFile($handle, $config)
     {
+        $workspaces = [];
+        $projects = [];
         $rows = [];
         $problemWithData = false;
         while (($row = fgetcsv($handle, 1000, ",")) !== FALSE) {
@@ -250,33 +308,46 @@ final class BuildTimesFileParser
             $dataRow->date = $date;
             $dataRow->count = intval($row[1]);
             $dataRow->type = $row[2];
+            if (count($row) >= 5) {
+                $dataRow->workspace = $row[3];
+                $dataRow->project = $row[4];
+                $workspaces[$dataRow->workspace] = true;
+                $projects[$dataRow->project] = true;
+            }
 
             $key = $date->format("Y-m-d");
 
-            $rows[$key][] = $dataRow;
+            if ($this->isSelected($dataRow, $config)) {
+                $rows[$key][] = $dataRow;
+            }
         }
 
         fclose($handle);
 
-        return [$rows, $problemWithData];
+        $workspaces = array_keys($workspaces);
+        $projects = array_keys($projects);
+
+        return [$rows, $problemWithData, $workspaces, $projects];
     }
 
     /**
      * @param DataRow[] $rows
      *
+     * @param BuildTimesConfig $config
      * @return BuildTimesData
      */
-    private function getData($rows)
+    private function getData($rows, $config)
     {
         $buildTime = 0;
-        $buildCount = count($rows);
+        $buildCount = 0;
         $successCount = 0;
         $failCount = 0;
         $failBuildTime = 0;
         $successBuildTime = 0;
 
-        /** @var DataRow $row */
         foreach ($rows as $row) {
+            $buildCount++;
+
             if ($row->type == "success") {
                 $successCount++;
                 $successBuildTime += $row->count;
@@ -302,10 +373,107 @@ final class BuildTimesFileParser
         $result->buildTime = $buildTime;
         $result->successBuildTime = $successBuildTime;
         $result->failBuildTime = $failBuildTime;
-        $result->dataFrom = reset($rows)->date;
-        $result->dataTo = end($rows)->date;
+        $result->dataFrom = !empty($rows) ? reset($rows)->date : null;
+        $result->dataTo = !empty($rows) ? end($rows)->date : null;
 
         return $result;
+    }
+
+    /**
+     * @param DataRow $dataRow
+     * @param BuildTimesConfig $config
+     */
+    private function isSelected($dataRow, $config)
+    {
+        if (empty($config->selectedWorkspaces) && empty($config->selectedProjects)) {
+            // All is selected
+            return true;
+        }
+
+        return in_array($dataRow->workspace, $config->selectedWorkspaces) || in_array($dataRow->project, $config->selectedProjects);
+    }
+}
+
+final class BuildTimesConfig
+{
+    /** @var [string] */
+    var $selectedWorkspaces = [];
+
+    /** @var [string] */
+    var $selectedProjects = [];
+
+    public function __construct($configFile)
+    {
+        $data = @file_get_contents($configFile);
+        if ($data === false) {
+//             error_log("Unable to read config file: {$this->configFile}");
+            // No exit, just return default config
+            return;
+        }
+
+        $json = json_decode($data, true);
+        if ($json === null) {
+//             error_log("Unable decode json read config: {$json}");
+            // No exit, just return default config
+            return;
+        }
+
+        $selectedWorkspacesKey = "selectedWorkspaces";
+        $selectedProjectsKey = "selectedProjects";
+        if (key_exists($selectedWorkspacesKey, $json) && is_array($json[$selectedWorkspacesKey])) {
+            foreach ($json[$selectedWorkspacesKey] as $selectedWorkspace) {
+                if (!is_string($selectedWorkspace)) {
+                    continue;
+                }
+                $this->selectedWorkspaces[] = $selectedWorkspace;
+            }
+        }
+
+        if (key_exists($selectedProjectsKey, $json) && is_array($json[$selectedProjectsKey])) {
+            foreach ($json[$selectedProjectsKey] as $selectedProject) {
+                if (!is_string($selectedProject)) {
+                    continue;
+                }
+                $this->selectedProjects[] = $selectedProject;
+            }
+        }
+    }
+
+    function toggleWorkspace($name)
+    {
+        $key = array_search($name, $this->selectedWorkspaces, true);
+        if ($key !== false) {
+            unset($this->selectedWorkspaces[$key]);
+        } else {
+            $this->selectedWorkspaces[] = $name;
+        }
+    }
+
+    function toggleProject($name)
+    {
+        $key = array_search($name, $this->selectedProjects, true);
+        if ($key !== false) {
+            unset($this->selectedProjects[$key]);
+        } else {
+            $this->selectedProjects[] = $name;
+        }
+    }
+
+    function selectAll()
+    {
+        $this->selectedWorkspaces = [];
+        $this->selectedProjects = [];
+    }
+
+    function save($configFile)
+    {
+        $data = json_encode($this, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        if ($data === false) {
+            error_log("Unable to serialize config");
+            exit(1);
+        }
+
+        file_put_contents($configFile, $data);
     }
 }
 
@@ -364,7 +532,9 @@ final class BitBarRenderer
         $rows[] = Strings::ROE_HEADER_TODAY;
 
         if ($this->data->totalData != null) {
-            $rows[] = sprintf(Strings::ROW_HEADER_TOTAL_SINCE, $this->data->totalData->dataFrom->format(Config::DATE_FORMAT)) . $alternate;
+            $dateFrom = $this->data->totalData->dataFrom;
+            $dateFromFormatted = $dateFrom !== null ? $dateFrom->format(Config::DATE_FORMAT) : "never"; // TODO localizable
+            $rows[] = sprintf(Strings::ROW_HEADER_TOTAL_SINCE, $dateFromFormatted) . $alternate;
         } else {
             $rows[] = Strings::ROW_HEADER_TOTAL . $alternate;
 
@@ -453,7 +623,60 @@ final class BitBarRenderer
 
         $this->renderRows($rows);
 
+        $this->renderPreferences();
         $this->renderAbout();
+    }
+
+    private function renderPreferences()
+    {
+        $rows = [];
+        $rows[] = Strings::ROW_SETTINGS;
+        $this->renderRows($rows);
+
+        $this->renderFilter($rows);
+
+        $rows = [];
+        $rows[] = "-- " . Strings::ROW_SETTINGS_RESET;
+        $rows[] = "---- " . Strings::ROW_SETTINGS_RESET_REALLY;
+        $rows[] = "------ " . Strings::ROW_SETTINGS_RESET_REALLY_YES . "| bash='" . __FILE__ . "' param1=reset refresh=true terminal=false";
+        $this->renderRows($rows);
+    }
+
+    private function renderFilter()
+    {
+        $check = ":heavy_check_mark: ";
+        $allSelected = empty($this->data->selectedWorkspaces) && empty($this->data->selectedProjects);
+
+        $rows = [];
+
+        $rows[] = "-- " . Strings::ROW_SETTINGS_FILTER;
+        $rows[] = "---- " . ($allSelected ? $check : "") . Strings::ROW_SETTINGS_FILTER_ALL . $this->getActionForProjectSelection("all", "-");
+
+        foreach ($this->data->workspaces as $workspace) {
+            $isSelected = in_array($workspace, $this->data->selectedWorkspaces);
+            $row = "---- ";
+            if ($isSelected) {
+                $row .= $check;
+            }
+            $row .= $this->sanitizeName($workspace);
+            $rows[] = $row . $this->getActionForProjectSelection("workspace", $workspace);
+        }
+
+        foreach ($this->data->projects as $project) {
+            $isSelected = in_array($project, $this->data->selectedProjects);
+            $row = "---- ";
+            if ($isSelected) {
+                $row .= $check;
+            }
+            $row .= $this->sanitizeName($project);
+            $rows[] = $row . $this->getActionForProjectSelection("project", $project);
+        }
+
+        $this->renderRows($rows);
+    }
+
+    private function sanitizeName($name) {
+        return preg_replace('~[\\n|]~', "_", $name);
     }
 
     private function renderAbout()
@@ -462,9 +685,6 @@ final class BitBarRenderer
         $rows[] = Strings::ROW_ABOUT;
         $rows[] = "-- " . Strings::ROW_ABOUT_SOURCE_CODE . "| href=" . Config::ABOUT_URL;
         $rows[] = "-- " . Strings::ROW_ABOUT_ICON . "| href=" . Config::ICON_URL;
-        $rows[] = "-- " . Strings::ROW_ABOUT_RESET;
-        $rows[] = "---- " . Strings::ROW_ABOUT_RESET_REALLY;
-        $rows[] = "------ " . Strings::ROW_ABOUT_RESET_REALLY_YES . "| bash='" . __FILE__ . "' param1=reset refresh=true terminal=false";
         $rows[] = "-- " . Strings::ROW_ABOUT_UPDATE;
         $rows[] = "---- " . Strings::ROW_ABOUT_UPDATE_REALLY;
         $rows[] = "------ " . Strings::ROW_ABOUT_UPDATE_REALLY_YES . "| bash='" . __FILE__ . "' param1=update param2=showAlerts refresh=true terminal=false";
@@ -501,6 +721,17 @@ final class BitBarRenderer
             return $interval->format("%ad %hh");
         }
     }
+
+    private function getActionForProjectSelection($type, $name)
+    {
+        // Bitbar doesn't handle correctly " and ' in parameters (maybe other caharcters) and no way to correctly escape
+        // so if it is in name no action allowed.
+        // TODO create issue on bitbar git
+        if (preg_match('~["\']~', $name)) {
+            return "";
+        }
+        return "| bash='" . __FILE__ . "' param1=config param2=filter_toggle param3=$type param4=\"$name\" refresh=true terminal=false";
+    }
 }
 
 final class BuildTimesOutput
@@ -515,6 +746,14 @@ final class BuildTimesOutput
     var $lastBuild;
     /** @var string[] */
     var $warnings = [];
+    /** @var string[] */
+    var $workspaces = [];
+    /** @var string[] */
+    var $projects = [];
+    /** @var string[] - empty means all */
+    var $selectedWorkspaces = [];
+    /** @var string[] - empty means all */
+    var $selectedProjects = [];
 }
 
 final class BuildTimesData
@@ -569,6 +808,10 @@ final class DataRow
     var $count;
     /** @var string */
     var $type;
+    /** @var string */
+    var $workspace;
+    /** @var string */
+    var $project;
 }
 
 function markStart($startTimeFilePath)
@@ -634,11 +877,12 @@ function getBuildHash()
     return md5($buildHash);
 }
 
-function update($where, $showAlerts) {
+function update($where, $showAlerts)
+{
     $options = array(
-        'http'=>array(
-            'method'=>"GET",
-            'headers'=> [
+        'http' => array(
+            'method' => "GET",
+            'headers' => [
                 "User-Agent: " . Config::UPDATE_USER_AGENT,
                 "Cache-Control: no-cache",
                 "Pragma: no-cache",
@@ -671,7 +915,7 @@ function update($where, $showAlerts) {
         }
     }
 
-    $updateFile = $where . DIRECTORY_SEPARATOR . Config::UPDATE_TMP_FILE;
+    $updateFile = $where . DIRECTORY_SEPARATOR . Config::UPDATE_TMP_FILE_NAME;
     $result = @file_put_contents($updateFile, $data);
     if ($result === false) {
         error_log("Unable to write update file to: " . $updateFile);
@@ -715,7 +959,39 @@ function update($where, $showAlerts) {
     exit(0);
 }
 
-function showAlert($message) {
+function showAlert($message)
+{
     $command = "osascript -e " . escapeshellarg('display alert "' . str_replace('"', '\"', Strings::UPDATE_ALERT_TITLE) . '" message "' . str_replace('"', '\"', $message) . '"') . "> /dev/null 2>&1 &";
     exec($command);
+}
+
+function processConfigChange($argv, $configFilePath)
+{
+
+    if (count($argv) < 3) {
+        return;
+    }
+
+    $config = new BuildTimesConfig($configFilePath);
+
+    switch ($argv[2]) {
+        case "filter_toggle":
+            $type = isset($argv[3]) ? $argv[3] : "";
+            $name = isset($argv[4]) ? $argv[4] : "";
+            switch ($type) {
+                case "all":
+                    $config->selectAll();
+                    $config->save($configFilePath);
+                    break;
+                case "workspace":
+                    $config->toggleWorkspace($name);
+                    $config->save($configFilePath);
+                    break;
+                case "project":
+                    $config->toggleProject($name);
+                    $config->save($configFilePath);
+                    break;
+            }
+            break;
+    }
 }
