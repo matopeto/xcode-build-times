@@ -36,9 +36,12 @@ final class Strings
     const WARNING_NO_DATA = "No data";
     const ROW_WARNING = ":warning: %s"; // %s will be replaced by warning message
 
-    const ROE_HEADER_TODAY = "Today";
+    const ROW_HEADER_TODAY = "Today";
+    const ROW_HEADER_TODAY_FILTER = "Today (%s)"; // %s will be replaced with selected workspaces and projects
     const ROW_HEADER_TOTAL = "Total";
+    const ROW_HEADER_TOTAL_FILTER = "Total (%s)"; // %s will be replaced with selected workspaces and projects
     const ROW_HEADER_TOTAL_SINCE = "Total, since: %s"; // %s will be replaced with first date of data
+    const ROW_HEADER_TOTAL_SINCE_FILTER = 'Total, since: %1$s (%2$s)'; // %1$s will be replaced with first date of data, 2$s will be replaced with selected workspaces and projects
 
     const ROW_BUILD_COUNTS = 'Builds %1$d, %3$d failed'; // %1$d - total, %2$d - succeeded, %3$d - failed
     const ROW_BUILD_COUNTS_NO_BUILDS = 'Builds: no builds yet';
@@ -170,7 +173,7 @@ final class BuildTimesFileParser
                 $result->warnings[] = Strings::WARNING_PROBLEM_WITH_DATA_FILE;
             }
 
-            $result->workspaces = array_unique(
+            $workspaces = array_unique(
                 array_filter(
                     array_merge(
                         $this->config->selectedWorkspaces,
@@ -180,9 +183,11 @@ final class BuildTimesFileParser
                         return $item !== null && !empty($item);
                     }
                 ),
-                SORT_STRING);
+              );
+            sort($workspaces);
+            $result->workspaces = $workspaces;
 
-            $result->projects = array_unique(
+            $projects = array_unique(
                 array_filter(
                     array_merge(
                         $this->config->selectedProjects,
@@ -192,7 +197,9 @@ final class BuildTimesFileParser
                         return $item !== null && !empty($item);
                     }
                 ),
-                SORT_STRING);
+             );
+            sort($projects);
+            $result->projects = $projects;
 
             /** @var DataRow[] $allRows */
             $allRows = array_reduce($rows, function ($all, $item) {
@@ -439,23 +446,33 @@ final class BuildTimesConfig
         }
     }
 
-    function toggleWorkspace($name)
+    function toggleWorkspace($name, $add)
     {
         $key = array_search($name, $this->selectedWorkspaces, true);
         if ($key !== false) {
             unset($this->selectedWorkspaces[$key]);
         } else {
-            $this->selectedWorkspaces[] = $name;
+            if ($add) {
+                $this->selectedWorkspaces[] = $name;
+            } else {
+                $this->selectedWorkspaces = [$name];
+                $this->selectedProjects = [];
+            }
         }
     }
 
-    function toggleProject($name)
+    function toggleProject($name, $add)
     {
         $key = array_search($name, $this->selectedProjects, true);
         if ($key !== false) {
             unset($this->selectedProjects[$key]);
         } else {
-            $this->selectedProjects[] = $name;
+            if ($add) {
+                $this->selectedProjects[] = $name;
+            } else {
+                $this->selectedWorkspaces = [];
+                $this->selectedProjects = [$name];
+            }
         }
     }
 
@@ -529,15 +546,31 @@ final class BitBarRenderer
         $dailyData = $this->data->dailyData;
 
         $alternate = "| alternate=true";
-        $rows[] = Strings::ROE_HEADER_TODAY;
+        $selectedFilter = array_merge($this->data->selectedWorkspaces, $this->data->selectedProjects);
+        $formattedSelectedFilter = implode(", ", array_map(function ($item) {
+            return $this->sanitizeName($item);
+        }, $selectedFilter));
+        if (empty($selectedFilter)) {
+            $rows[] = Strings::ROW_HEADER_TODAY;
+        } else {
+            $rows[] = sprintf(Strings::ROW_HEADER_TODAY_FILTER, $formattedSelectedFilter);
+        }
 
         if ($this->data->totalData != null) {
             $dateFrom = $this->data->totalData->dataFrom;
             $dateFromFormatted = $dateFrom !== null ? $dateFrom->format(Config::DATE_FORMAT) : "never"; // TODO localizable
-            $rows[] = sprintf(Strings::ROW_HEADER_TOTAL_SINCE, $dateFromFormatted) . $alternate;
-        } else {
-            $rows[] = Strings::ROW_HEADER_TOTAL . $alternate;
+            if (empty($selectedFilter)) {
+                $rows[] = sprintf(Strings::ROW_HEADER_TOTAL_SINCE, $dateFromFormatted) . $alternate;
+            } else {
+                $rows[] = sprintf(Strings::ROW_HEADER_TOTAL_SINCE_FILTER, $dateFromFormatted, $formattedSelectedFilter) . $alternate;
 
+            }
+        } else {
+            if (empty($selectedFilter)) {
+                $rows[] = Strings::ROW_HEADER_TOTAL . $alternate;
+            } else {
+                $rows[] = sprintf(Strings::ROW_HEADER_TOTAL_FILTER, $formattedSelectedFilter) . $alternate;
+            }
         }
 
         $rows[] = $this->getBuildCountsRow($todayData);
@@ -645,12 +678,13 @@ final class BitBarRenderer
     private function renderFilter()
     {
         $check = ":heavy_check_mark: ";
+        $alternate = " alternate=true";
         $allSelected = empty($this->data->selectedWorkspaces) && empty($this->data->selectedProjects);
 
         $rows = [];
 
         $rows[] = "-- " . Strings::ROW_SETTINGS_FILTER;
-        $rows[] = "---- " . ($allSelected ? $check : "") . Strings::ROW_SETTINGS_FILTER_ALL . $this->getActionForProjectSelection("all", "-");
+        $rows[] = "---- " . ($allSelected ? $check : "") . Strings::ROW_SETTINGS_FILTER_ALL . $this->getActionForProjectSelection("all", "-", false);
 
         foreach ($this->data->workspaces as $workspace) {
             $isSelected = in_array($workspace, $this->data->selectedWorkspaces);
@@ -659,7 +693,8 @@ final class BitBarRenderer
                 $row .= $check;
             }
             $row .= $this->sanitizeName($workspace);
-            $rows[] = $row . $this->getActionForProjectSelection("workspace", $workspace);
+            $rows[] = $row . $this->getActionForProjectSelection("workspace", $workspace, false);
+            $rows[] = $row . $this->getActionForProjectSelection("workspace", $workspace, true) . $alternate;
         }
 
         foreach ($this->data->projects as $project) {
@@ -669,13 +704,15 @@ final class BitBarRenderer
                 $row .= $check;
             }
             $row .= $this->sanitizeName($project);
-            $rows[] = $row . $this->getActionForProjectSelection("project", $project);
+            $rows[] = $row . $this->getActionForProjectSelection("project", $project, false);
+            $rows[] = $row . $this->getActionForProjectSelection("project", $project, true) . $alternate;
         }
 
         $this->renderRows($rows);
     }
 
-    private function sanitizeName($name) {
+    private function sanitizeName($name)
+    {
         return preg_replace('~[\\n|]~', "_", $name);
     }
 
@@ -722,7 +759,7 @@ final class BitBarRenderer
         }
     }
 
-    private function getActionForProjectSelection($type, $name)
+    private function getActionForProjectSelection($type, $name, $add)
     {
         // Bitbar doesn't handle correctly " and ' in parameters (maybe other caharcters) and no way to correctly escape
         // so if it is in name no action allowed.
@@ -730,7 +767,8 @@ final class BitBarRenderer
         if (preg_match('~["\']~', $name)) {
             return "";
         }
-        return "| bash='" . __FILE__ . "' param1=config param2=filter_toggle param3=$type param4=\"$name\" refresh=true terminal=false";
+        $mode = $add ? "add" : "set";
+        return "| bash='" . __FILE__ . "' param1=config param2=filter_toggle param3=$type param4=\"$name\" param5=$mode refresh=true terminal=false";
     }
 }
 
@@ -978,17 +1016,21 @@ function processConfigChange($argv, $configFilePath)
         case "filter_toggle":
             $type = isset($argv[3]) ? $argv[3] : "";
             $name = isset($argv[4]) ? $argv[4] : "";
+            $mode = isset($argv[5]) ? $argv[5] : "set";
+            if (!preg_match("~set|add~", $mode)) {
+                $mode = "set";
+            }
             switch ($type) {
                 case "all":
                     $config->selectAll();
                     $config->save($configFilePath);
                     break;
                 case "workspace":
-                    $config->toggleWorkspace($name);
+                    $config->toggleWorkspace($name, $mode === "add");
                     $config->save($configFilePath);
                     break;
                 case "project":
-                    $config->toggleProject($name);
+                    $config->toggleProject($name, $mode === "add");
                     $config->save($configFilePath);
                     break;
             }
