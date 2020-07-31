@@ -576,43 +576,63 @@ final class BitBarRenderer
         $rows[] = $this->getBuildCountsRow($todayData);
         $rows[] = $this->getBuildCountsRow($totalData) . $alternate;
 
+        $todayBuildTime = $this->getFormatedTimeRow($todayData, "buildTime", Strings::ROW_BUILD_TIME);
+        $totalBuildTime = $this->getFormatedTimeRow($totalData, "buildTime", Strings::ROW_BUILD_TIME);
 
-        $rows[] = $this->getFormatedTimeRow($todayData, "buildTime", Strings::ROW_BUILD_TIME);
-        $rows[] = "-- " . $this->getFormatedTimeRow($todayData, "successBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
-        $rows[] = "-- " . $this->getFormatedTimeRow($totalData, "successBuildTime", Strings::ROW_SUCCESS_BUILD_TIME) . $alternate;
-        $rows[] = "-- " . $this->getFormatedTimeRow($todayData, "failBuildTime", Strings::ROW_FAIL_BUILD_TIME);
-        $rows[] = "-- " . $this->getFormatedTimeRow($totalData, "failBuildTime", Strings::ROW_FAIL_BUILD_TIME) . $alternate;
+        $todaySuccessBuildTime = $this->getFormatedTimeRow($todayData, "successBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
+        $totalSuccessBuildTime = $this->getFormatedTimeRow($totalData, "successBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
 
-        $rows[] = $this->getFormatedTimeRow($totalData, "buildTime", Strings::ROW_BUILD_TIME) . $alternate;
-        $rows[] = "-- " . $this->getFormatedTimeRow($todayData, "successBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
-        $rows[] = "-- " . $this->getFormatedTimeRow($totalData, "successBuildTime", Strings::ROW_SUCCESS_BUILD_TIME) . $alternate;
-        $rows[] = "-- " . $this->getFormatedTimeRow($todayData, "failBuildTime", Strings::ROW_FAIL_BUILD_TIME);
-        $rows[] = "-- " . $this->getFormatedTimeRow($totalData, "failBuildTime", Strings::ROW_FAIL_BUILD_TIME) . $alternate;
+        $todayFailBuildTime = $this->getFormatedTimeRow($todayData, "failBuildTime", Strings::ROW_FAIL_BUILD_TIME);
+        $totalFailBuildTime = $this->getFormatedTimeRow($totalData, "failBuildTime", Strings::ROW_FAIL_BUILD_TIME);
 
-        $rows[] = $this->getFormatedTimeRow($todayData, "averageBuildTime", Strings::ROW_AVERAGE_BUILD_TIME);
-        $rows[] = "-- " . $this->getFormatedTimeRow($todayData, "averageSuccessBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
-        $rows[] = "-- " . $this->getFormatedTimeRow($totalData, "averageSuccessBuildTime", Strings::ROW_SUCCESS_BUILD_TIME) . $alternate;
-        $rows[] = "-- " . $this->getFormatedTimeRow($todayData, "averageFailBuildTime", Strings::ROW_FAIL_BUILD_TIME);
-        $rows[] = "-- " . $this->getFormatedTimeRow($totalData, "averageFailBuildTime", Strings::ROW_FAIL_BUILD_TIME) . $alternate;
+        $todayAverageBuildTime = $this->getFormatedTimeRow($todayData, "averageBuildTime", Strings::ROW_AVERAGE_BUILD_TIME);
 
-        $rows[] = $this->getFormatedTimeRow($totalData, "averageBuildTime", Strings::ROW_AVERAGE_BUILD_TIME) . $alternate;
-        $rows[] = "-- " . $this->getFormatedTimeRow($todayData, "averageSuccessBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
-        $rows[] = "-- " . $this->getFormatedTimeRow($totalData, "averageSuccessBuildTime", Strings::ROW_SUCCESS_BUILD_TIME) . $alternate;
-        $rows[] = "-- " . $this->getFormatedTimeRow($todayData, "averageFailBuildTime", Strings::ROW_FAIL_BUILD_TIME);
-        $rows[] = "-- " . $this->getFormatedTimeRow($totalData, "averageFailBuildTime", Strings::ROW_FAIL_BUILD_TIME) . $alternate;
+        $todayAverageSuccessBuildTime = $this->getFormatedTimeRow($todayData, "averageSuccessBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
+        $totalAverageSuccessBuildTime = $this->getFormatedTimeRow($totalData, "averageSuccessBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
+        $todayAverageFailBuildTime = $this->getFormatedTimeRow($todayData, "averageFailBuildTime", Strings::ROW_FAIL_BUILD_TIME);
+        $totalAverageFailBuildTime = $this->getFormatedTimeRow($totalData, "averageFailBuildTime", Strings::ROW_FAIL_BUILD_TIME);
+        $totalAverageBuildTime = $this->getFormatedTimeRow($totalData, "averageBuildTime", Strings::ROW_AVERAGE_BUILD_TIME);
+
+        // Build time
+
+        $buildTimeSubMenu = [];
+        $buildTimeSubMenu[] = "-- " . $todaySuccessBuildTime;
+        $buildTimeSubMenu[] = "-- " . $totalSuccessBuildTime . $alternate;
+        $buildTimeSubMenu[] = "-- " . $todayFailBuildTime;
+        $buildTimeSubMenu[] = "-- " . $totalFailBuildTime . $alternate;
+
+        $rows[] = $todayBuildTime;
+        $rows = array_merge($rows, $buildTimeSubMenu);
+
+        $rows[] = $totalBuildTime . $alternate;
+        $rows = array_merge($rows, $buildTimeSubMenu);
+
+        // Average build time
+
+        $averageBuildTimeSubMenu = [];
+        $averageBuildTimeSubMenu[] = "-- " . $todayAverageSuccessBuildTime;
+        $averageBuildTimeSubMenu[] = "-- " . $totalAverageSuccessBuildTime . $alternate;
+        $averageBuildTimeSubMenu[] = "-- " . $todayAverageFailBuildTime;
+        $averageBuildTimeSubMenu[] = "-- " . $totalAverageFailBuildTime . $alternate;
+
+        $rows[] = $todayAverageBuildTime;
+        $rows = array_merge($rows, $averageBuildTimeSubMenu);
+
+        $rows[] = $totalAverageBuildTime . $alternate;
+        $rows = array_merge($rows, $averageBuildTimeSubMenu);
+
+        // Daily data
 
         if ($dailyData !== null) {
             $rows[] = sprintf(Strings::ROW_DAILY_AVERAGE_BUILD_TIME, $this->format($dailyData->averageBuildTime), $dailyData->averageBuildCount);
             $rows[] = "-- " . sprintf(Strings::ROW_DAILY_SUCCESS_BUILD_TIME, $this->format($dailyData->averageSuccessBuildTime), $dailyData->averageSuccessCount);
             $rows[] = "-- " . sprintf(Strings::ROW_DAILY_FAIL_BUILD_TIME, $this->format($dailyData->averageFailBuildTime), $dailyData->averageFailCount);
-
         }
 
         if ($this->data->lastBuild !== null) {
             $rows[] = "---";
             $rows[] = sprintf(Strings::ROW_LAST_BUILD, $this->data->lastBuild->type, $this->format($this->data->lastBuild->count));
         }
-
 
         $this->renderRows($rows);
     }
