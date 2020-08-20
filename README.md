@@ -2,7 +2,7 @@
 
 ![](screenshots/menubar.png)
 
-Have you even wondered how much time a day you spend waiting for Xcode to do your builds? Wonder no more, this [BitBar](https://getbitbar.com/) plugin shows the time wasted right in your menu bar.
+Have you ever wondered how much time a day you spend waiting for Xcode to do your builds? Wonder no more, this [BitBar](https://getbitbar.com/) plugin shows the time wasted right in your menu bar!
 
 ![](screenshots/menubar-extended.png)
 
@@ -50,7 +50,7 @@ and succeeds
 
 ### Optional setup
 
-The script is called `xcodeBuildTimes.1m.php` so BitBar will refresh the data every minute. If you want to use a different refresh interval, just change the `1m` in the script name yo your desired interval. 
+The script is called `xcodeBuildTimes.1m.php` so BitBar will refresh the data every minute. If you want to use a different refresh interval, just change the `1m` in the script name to your desired interval. 
 
 You can find [more info about the refresh intervals in the BitBar documentation](https://github.com/matryer/bitbar#configure-the-refresh-time).
 
