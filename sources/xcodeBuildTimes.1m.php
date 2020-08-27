@@ -118,9 +118,10 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
     die;
 }
 
-$parser = new BuildTimesFileParser($dataFilePath, $configFilePath);
+$config = new BuildTimesConfig($configFilePath);
+$parser = new BuildTimesFileParser($dataFilePath, $config);
 $data = $parser->getOutput();
-$renderer = new BitBarRenderer($data);
+$renderer = new BitBarRenderer($data, $config);
 $renderer->render();
 
 final class BuildTimesFileParser
@@ -128,21 +129,22 @@ final class BuildTimesFileParser
     /** @var string */
     private $dataFile;
 
-    /** @var string */
-    private $configFile;
-
     /** @var BuildTimesConfig */
     private $config;
+
+    /** @var DateTimeZone */
+    private $localTimeZone;
 
     /**
      * BuildTimesFileParser constructor.
      * @param string $dataFile
-     * @param string $configFile
+     * @param BuildTimesConfig $config
      */
-    public function __construct($dataFile, $configFile)
+    public function __construct($dataFile, $config)
     {
         $this->dataFile = $dataFile;
-        $this->configFile = $configFile;
+        $this->config = $config;
+        $this->localTimeZone = $config->localTimeZone;
     }
 
     /**
@@ -152,9 +154,6 @@ final class BuildTimesFileParser
     public function getOutput()
     {
         $result = new BuildTimesOutput();
-
-        // Read config
-        $this->config = new BuildTimesConfig($this->configFile);
 
         // Read CSV
         $handle = @fopen($this->dataFile, "r");
@@ -182,8 +181,8 @@ final class BuildTimesFileParser
                     function ($item) {
                         return $item !== null && !empty($item);
                     }
-                ),
-              );
+                )
+            );
             sort($workspaces);
             $result->workspaces = $workspaces;
 
@@ -196,8 +195,8 @@ final class BuildTimesFileParser
                     function ($item) {
                         return $item !== null && !empty($item);
                     }
-                ),
-             );
+                )
+            );
             sort($projects);
             $result->projects = $projects;
 
@@ -213,17 +212,23 @@ final class BuildTimesFileParser
             if (empty($allRows)) {
                 $result->warnings[] = Strings::WARNING_NO_DATA;
             } else {
-                $result->totalData = $this->getData($allRows, $this->config);
+                $result->totalData = $this->getData($allRows);
                 $result->lastBuild = end($allRows);
             }
 
             // Today rows
             // Get today
-            $todayKey = (new DateTime())->format("Y-m-d");
-            if (key_exists($todayKey, $rows)) {
+            /** @var string|null $todayKey */
+            $todayKey = null;
+            try {
+                $todayKey = (new DateTime("now", $this->localTimeZone))->format("Y-m-d");
+            } catch (Exception $ex) {
+            }
+            
+            if ($todayKey !== null && key_exists($todayKey, $rows)) {
                 // Today data
                 $todayRows = $rows[$todayKey];
-                $result->todayData = $this->getData($todayRows, $this->config);
+                $result->todayData = $this->getData($todayRows);
             }
 
             // Daily data
@@ -241,7 +246,7 @@ final class BuildTimesFileParser
                     continue;
                 }
 
-                $dayData = $this->getData($data, $this->config);
+                $dayData = $this->getData($data);
                 $days++;
                 $bt += $dayData->buildTime;
                 $sbt += $dayData->successBuildTime;
@@ -290,9 +295,9 @@ final class BuildTimesFileParser
                 continue;
             }
 
-            if (!preg_match('~[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}~', $row[0])) {
-                $problemWithData = true;
-                continue;
+            $dateInOldFormat = false;
+            if (preg_match('~[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}~', $row[0])) {
+                $dateInOldFormat = true;
             }
 
             if (!preg_match('~[0-9]+~', $row[1])) {
@@ -305,11 +310,26 @@ final class BuildTimesFileParser
                 continue;
             }
 
+            /** @var DateTime $date */
+            $date = NULL;
+
             $dataRow = new DataRow();
-            $date = DateTime::createFromFormat("Y-m-d H:i:s", $row[0]);
-            if ($date == false) {
-                $problemWithData = true;
-                continue;
+
+            if ($dateInOldFormat) {
+                // Old format (without time zone)
+                $date = DateTime::createFromFormat("Y-m-d H:i:s", $row[0]);
+                if ($date == false) {
+                    $problemWithData = true;
+                    continue;
+                }
+            } else {
+                // New format (with time zone)
+                try {
+                    $date = new DateTime($row[0]);
+                } catch (Exception $e) {
+                    $problemWithData = true;
+                    continue;
+                }
             }
 
             $dataRow->date = $date;
@@ -322,7 +342,11 @@ final class BuildTimesFileParser
                 $projects[$dataRow->project] = true;
             }
 
-            $key = $date->format("Y-m-d");
+            $keyDate = clone $date;
+            if ($this->localTimeZone !== null) {
+                $keyDate->setTimezone($this->localTimeZone);
+            }
+            $key = $keyDate->format("Y-m-d");
 
             if ($this->isSelected($dataRow, $config)) {
                 $rows[$key][] = $dataRow;
@@ -340,10 +364,9 @@ final class BuildTimesFileParser
     /**
      * @param DataRow[] $rows
      *
-     * @param BuildTimesConfig $config
      * @return BuildTimesData
      */
-    private function getData($rows, $config)
+    private function getData($rows)
     {
         $buildTime = 0;
         $buildCount = 0;
@@ -389,6 +412,7 @@ final class BuildTimesFileParser
     /**
      * @param DataRow $dataRow
      * @param BuildTimesConfig $config
+     * @return bool
      */
     private function isSelected($dataRow, $config)
     {
@@ -409,6 +433,16 @@ final class BuildTimesConfig
     /** @var [string] */
     var $selectedProjects = [];
 
+    /** @var DateTimeZone|null */
+    var $localTimeZone = null;
+
+    /** @var Bool */
+    private $localTimeZoneAutodetect = true;
+
+    const selectedWorkspacesKey = "selectedWorkspaces";
+    const selectedProjectsKey = "selectedProjects";
+    const selectedLocalTimeZoneKey = "localTimeZone";
+
     public function __construct($configFile)
     {
         $data = @file_get_contents($configFile);
@@ -425,10 +459,8 @@ final class BuildTimesConfig
             return;
         }
 
-        $selectedWorkspacesKey = "selectedWorkspaces";
-        $selectedProjectsKey = "selectedProjects";
-        if (key_exists($selectedWorkspacesKey, $json) && is_array($json[$selectedWorkspacesKey])) {
-            foreach ($json[$selectedWorkspacesKey] as $selectedWorkspace) {
+        if (key_exists(self::selectedWorkspacesKey, $json) && is_array($json[self::selectedWorkspacesKey])) {
+            foreach ($json[self::selectedWorkspacesKey] as $selectedWorkspace) {
                 if (!is_string($selectedWorkspace)) {
                     continue;
                 }
@@ -436,13 +468,26 @@ final class BuildTimesConfig
             }
         }
 
-        if (key_exists($selectedProjectsKey, $json) && is_array($json[$selectedProjectsKey])) {
-            foreach ($json[$selectedProjectsKey] as $selectedProject) {
+        if (key_exists(self::selectedProjectsKey, $json) && is_array($json[self::selectedProjectsKey])) {
+            foreach ($json[self::selectedProjectsKey] as $selectedProject) {
                 if (!is_string($selectedProject)) {
                     continue;
                 }
                 $this->selectedProjects[] = $selectedProject;
             }
+        }
+
+        if (key_exists(self::selectedLocalTimeZoneKey, $json) && is_string($json[self::selectedLocalTimeZoneKey])) {
+            try {
+                $timeZoneString = $json[self::selectedLocalTimeZoneKey];
+                $this->localTimeZone = new DateTimeZone($timeZoneString);
+                $this->localTimeZoneAutodetect = false;
+
+            } catch (Exception $e) {
+                $this->localTimeZone = $this->getLocalTimeZone();
+            }
+        } else {
+            $this->localTimeZone = $this->getLocalTimeZone();
         }
     }
 
@@ -484,13 +529,45 @@ final class BuildTimesConfig
 
     function save($configFile)
     {
-        $data = json_encode($this, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $dataToSave = [
+            self::selectedProjectsKey => $this->selectedProjects,
+            self::selectedWorkspacesKey => $this->selectedWorkspaces,
+        ];
+
+        if ($this->localTimeZone !== null && $this->localTimeZoneAutodetect === false) {
+            $dataToSave[self::selectedLocalTimeZoneKey] = $this->localTimeZone->getName();
+        }
+
+        $data = json_encode($dataToSave, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         if ($data === false) {
             error_log("Unable to serialize config");
             exit(1);
         }
 
         file_put_contents($configFile, $data);
+    }
+
+    /**
+     * @return DateTimeZone|null
+     */
+    private function getLocalTimeZone()
+    {
+        // On macOS /etc/localtime is symlink to file with time zone info, e.g.
+        // /etc/localtime -> /var/db/timezone/zoneinfo/Europe/Prague
+        // we read this file to determine local time zone
+        $link = "/etc/localtime";
+        if (is_link($link)) {
+            $realPath = realpath($link);
+            $timeZone = preg_replace("~.*zoneinfo/~", "", $realPath);
+
+            try {
+                return new DateTimeZone($timeZone);
+            } catch (Exception $e) {
+                return null;
+            }
+        }
+
+        return null;
     }
 }
 
@@ -499,12 +576,17 @@ final class BitBarRenderer
     /** @var BuildTimesOutput */
     private $data;
 
+    /** @var DateTimeZone */
+    private $localTimeZone;
+
     /**
      * @param $data BuildTimesOutput
+     * @param $config BuildTimesConfig
      */
-    public function __construct($data)
+    public function __construct($data, $config)
     {
         $this->data = $data;
+        $this->localTimeZone = $config->localTimeZone;
     }
 
     public function render()
@@ -557,7 +639,10 @@ final class BitBarRenderer
         }
 
         if ($this->data->totalData != null) {
-            $dateFrom = $this->data->totalData->dataFrom;
+            $dateFrom = clone $this->data->totalData->dataFrom;
+            if ($this->localTimeZone !== null) {
+                $dateFrom->setTimezone($this->localTimeZone);
+            }
             $dateFromFormatted = $dateFrom !== null ? $dateFrom->format(Config::DATE_FORMAT) : "never"; // TODO localizable
             if (empty($selectedFilter)) {
                 $rows[] = sprintf(Strings::ROW_HEADER_TOTAL_SINCE, $dateFromFormatted) . $alternate;
@@ -686,7 +771,7 @@ final class BitBarRenderer
         $rows[] = Strings::ROW_SETTINGS;
         $this->renderRows($rows);
 
-        $this->renderFilter($rows);
+        $this->renderFilter();
 
         $rows = [];
         $rows[] = "-- " . Strings::ROW_SETTINGS_RESET;
@@ -765,8 +850,8 @@ final class BitBarRenderer
     private function format($seconds)
     {
         $seconds = round($seconds);
-        $dtF = new \DateTime('@0');
-        $dtT = new \DateTime("@$seconds");
+        $dtF = new DateTime('@0');
+        $dtT = new DateTime("@$seconds");
         $interval = $dtT->diff($dtF);
         if ($seconds < 60) {
             return "{$seconds}s";
@@ -902,7 +987,7 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     $project = $project === false ? "" : $project;
 
     $data = [
-        date("Y-m-d H:i:s"),
+        (new DateTime())->format("c"),
         $duration,
         $type,
         $workspace,
@@ -1025,7 +1110,6 @@ function showAlert($message)
 
 function processConfigChange($argv, $configFilePath)
 {
-
     if (count($argv) < 3) {
         return;
     }
