@@ -10,7 +10,7 @@ Have you ever wondered how much time a day you spend waiting for Xcode to do you
 
 ### BitBar installation and setup
 
-This script works as a [BitBar](https://getbitbar.com/) plugin so you need to install BitBar first. You can download the [latest release from GitHub](https://github.com/matryer/bitbar/releases/latest) or use `brew`
+This script works as a [BitBar](https://github.com/matryer/bitbar#get-started) plugin so you need to install BitBar first. You can download the [latest release from GitHub](https://github.com/matryer/bitbar/releases/latest) or use `brew`
 
 ```bash
 brew cask install bitbar
