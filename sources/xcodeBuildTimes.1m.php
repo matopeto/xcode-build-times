@@ -986,12 +986,30 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     $project = getenv("XcodeProject");
     $project = $project === false ? "" : $project;
 
+    $xcodeVersion = "";
+    $xcodeBuild = "";
+
+    $developerDirectory = getenv("XcodeDeveloperDirectory");
+
+    if ($developerDirectory !== false) {
+        $xcodeBuild = "build";
+        $xcodeBuild = "version";
+        // Get Xcode version and build from version plist
+        $plist = @simplexml_load_file($developerDirectory . "/../version.plist");
+        if ($plist !== false) {
+            $xcodeVersion = getPlistValue($plist, "CFBundleShortVersionString");
+            $xcodeBuild = getPlistValue($plist, "ProductBuildVersion");
+        }
+    }
+
     $data = [
         (new DateTime())->format("c"),
         $duration,
         $type,
         $workspace,
         $project,
+        $xcodeVersion,
+        $xcodeBuild
     ];
 
     $handle = @fopen($dataFilePath, "a");
@@ -1139,5 +1157,24 @@ function processConfigChange($argv, $configFilePath)
                     break;
             }
             break;
+    }
+}
+
+/**
+ * @param SimpleXMLElement $plist
+ * @param string $key
+ *
+ * @return string
+ */
+function getPlistValue($plist, $key) {
+    $query = '/plist/dict/key[text()="'.$key.'"]/following-sibling::*[1]';
+    $result = @$plist->xpath($query);
+    if ($result === false) {
+        return "";
+    }
+    if (count($result) === 1) {
+        return (string)$result[0];
+    } else {
+        return "";
     }
 }
