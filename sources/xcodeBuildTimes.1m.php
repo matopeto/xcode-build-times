@@ -34,7 +34,7 @@ final class Strings
     const WARNING_UNABLE_TO_READ_DATA_FILE = "Unable to read data file";
     const WARNING_PROBLEM_WITH_DATA_FILE = "There is some problem with data";
     const WARNING_NO_DATA = "No data";
-    const ROW_WARNING = ":warning: %s"; // %s will be replaced by warning message
+    const ROW_WARNING = "⚠️ %s"; // %s will be replaced by warning message
 
     const ROW_HEADER_TODAY = "Today";
     const ROW_HEADER_TODAY_FILTER = "Today (%s)"; // %s will be replaced with selected workspaces and projects
@@ -603,7 +603,7 @@ final class BitBarRenderer
         $row .= $this->format($buildTime);
 
         if (count($this->data->warnings) > 0) {
-            $row .= " :warning:";
+            $row .= " ⚠️";
         }
         $row .= " | templateImage=" . Config::ICON;
 
@@ -782,7 +782,7 @@ final class BitBarRenderer
 
     private function renderFilter()
     {
-        $check = ":heavy_check_mark: ";
+        $check = "✔ ";
         $alternate = " alternate=true";
         $allSelected = empty($this->data->selectedWorkspaces) && empty($this->data->selectedProjects);
 
