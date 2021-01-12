@@ -2,7 +2,7 @@
 
 ![](screenshots/menubar.png)
 
-Have you ever wondered how much time a day you spend waiting for Xcode to do your builds? Wonder no more, this [BitBar](https://getbitbar.com/) or [SwiftBar][https://github.com/swiftbar/SwiftBar/] plugin shows the time wasted right in your menu bar!
+Have you ever wondered how much time a day you spend waiting for Xcode to do your builds? Wonder no more, this [BitBar](https://getbitbar.com/) or [SwiftBar](https://github.com/swiftbar/SwiftBar/) plugin shows the time wasted right in your menu bar!
 
 ![](screenshots/menubar-extended.png)
 
@@ -10,7 +10,7 @@ Have you ever wondered how much time a day you spend waiting for Xcode to do you
 
 You can use this plugin with BitBar (seems dead, but still functional project) or newer Swiftbar (in development)
 
-So first install [BitBar](https://github.com/matryer/bitbar#get-started or [SwiftBar][https://github.com/swiftbar/SwiftBar#how-to-get-swiftbar]
+So first install [BitBar](https://github.com/matryer/bitbar#get-started) or [SwiftBar](https://github.com/swiftbar/SwiftBar#how-to-get-swiftbar)
 
 On the first run select a directory you wish to use as your plugin directory, for example `~/BitBarPlugins`.
 
