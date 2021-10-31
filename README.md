@@ -1,5 +1,12 @@
 # Xcode build times
 
+⚠️ Monterey users -> see [Issue #17](https://github.com/matopeto/xcode-build-times/issues/17)
+TL;DR; -> You must install PHP -> `brew install php`
+
+------
+
+# Xcode build times
+
 ![](screenshots/menubar.png)
 
 Have you ever wondered how much time a day you spend waiting for Xcode to do your builds? Wonder no more, this [xbar](https://github.com/matryer/xbar)(the BitBar reboot) or [SwiftBar](https://github.com/swiftbar/SwiftBar/) plugin shows the time wasted right in your menu bar!
@@ -13,6 +20,8 @@ You can use this plugin with xbar (the BitBar reboot) or newer Swiftbar (in deve
 So first install [xbar](https://github.com/matryer/xbar#get-started) or [SwiftBar](https://github.com/swiftbar/SwiftBar#how-to-get-swiftbar)
 
 On the first run select a directory you wish to use as your plugin directory, for example `~/BitBarPlugins`.
+
+If you are using macOS Monterey then you must install PHP, because it is not bundled in macOS anymore. see [Issue #17](https://github.com/matopeto/xcode-build-times/issues/17) e.g. from Homebrew: `brew install php`
 
 ### Plugin installation
 
