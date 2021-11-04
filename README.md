@@ -1,7 +1,7 @@
 # Xcode build times
 
 ⚠️ Monterey users -> see [Issue #17](https://github.com/matopeto/xcode-build-times/issues/17)
-TL;DR; -> You must install PHP -> `brew install php`
+TL;DR; -> You must install PHP -> `brew install php` and maybe switch Swiftbar shell to zsh
 
 ------
 
