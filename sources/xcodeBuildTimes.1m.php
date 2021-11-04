@@ -211,7 +211,10 @@ final class BuildTimesFileParser
             }, []);
 
             usort($allRows, function ($a, $b) {
-                return $a->date > $b->date;
+                if ($a->date === $b->date) {
+                    return 0;
+                }
+                return ($a->date < $b->date) ? -1 : 1;
             });
 
             if (empty($allRows)) {
