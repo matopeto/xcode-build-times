@@ -14,6 +14,7 @@
 # <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
 # <swiftbar.hideDisablePlugin>true</swiftbar.hideDisablePlugin>
 # <swiftbar.hideSwiftBar>true</swiftbar.hideSwiftBar>
+# <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>
 
 final class Config
 {
@@ -61,6 +62,7 @@ final class Strings
     const ROW_DAILY_FAIL_BUILD_TIME = 'Fail: %1$s, %2$s builds'; // %1$s will be replaced with corresponding build time, %1$s with build counts
 
     const ROW_LAST_BUILD = 'Last build: %1$s, %2$s'; // %1$d will be replaced with status (success/fail) %2$d with duration
+    const ROW_BUILD_IN_PROGRESS = 'Build in progress: %s'; // %s will be replaced with current duration of build in progress
 
     const ROW_REFRESH = "Refresh";
 
@@ -93,7 +95,9 @@ $scriptDirectory = realpath(__DIR__);
 $dataDirectory = $scriptDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_DIR;
 $dataFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_NAME;
 $configFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::CONFIG_FILE_NAME;
-$startTimeFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::START_TIME_FILE_NAME . "." . $buildHash;
+$startTimeFilePathWithoutHash = $dataDirectory . DIRECTORY_SEPARATOR . Config::START_TIME_FILE_NAME;
+$startTimeFilesPattern = $startTimeFilePathWithoutHash . "\.*";
+$startTimeFilePath = $startTimeFilePathWithoutHash . "." . $buildHash;
 
 if (!file_exists($dataDirectory)) {
     mkdir($dataDirectory);
@@ -124,7 +128,7 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
 }
 
 $config = new BuildTimesConfig($configFilePath);
-$parser = new BuildTimesFileParser($dataFilePath, $config);
+$parser = new BuildTimesFileParser($dataFilePath, $startTimeFilesPattern, $config);
 $data = $parser->getOutput();
 $renderer = new BitBarRenderer($data, $config);
 $renderer->render();
@@ -133,6 +137,9 @@ final class BuildTimesFileParser
 {
     /** @var string */
     private $dataFile;
+
+    /** @var string */
+    private $startTimeFilesPattern;
 
     /** @var BuildTimesConfig */
     private $config;
@@ -143,11 +150,13 @@ final class BuildTimesFileParser
     /**
      * BuildTimesFileParser constructor.
      * @param string $dataFile
+     * @param string $startTimeFilesPattern
      * @param BuildTimesConfig $config
      */
-    public function __construct($dataFile, $config)
+    public function __construct($dataFile, $startTimeFilesPattern, $config)
     {
         $this->dataFile = $dataFile;
+        $this->startTimeFilesPattern = $startTimeFilesPattern;
         $this->config = $config;
         $this->localTimeZone = $config->localTimeZone;
     }
@@ -281,6 +290,15 @@ final class BuildTimesFileParser
 
         $result->selectedWorkspaces = $this->config->selectedWorkspaces;
         $result->selectedProjects = $this->config->selectedProjects;
+
+        // Determine if some builds are in progress
+        $files = glob($this->startTimeFilesPattern);
+        foreach ($files as $file) {
+            $duration = getProgressDuration($file);
+            if ($duration > 0 && $duration < 86400) { // We skip very long durations, probably old not removed start files.
+                $result->inProgress[] = $duration;
+            }
+        }
 
         return $result;
     }
@@ -727,6 +745,10 @@ final class BitBarRenderer
             $rows[] = sprintf(Strings::ROW_LAST_BUILD, $this->data->lastBuild->type, $this->format($this->data->lastBuild->count));
         }
 
+        foreach ($this->data->inProgress as $inProgress) {
+            $rows[] = sprintf(Strings::ROW_BUILD_IN_PROGRESS, $this->format($inProgress));
+        }
+
         $this->renderRows($rows);
     }
 
@@ -895,6 +917,8 @@ final class BuildTimesOutput
     var $dailyData;
     /** @var DataRow */
     var $lastBuild;
+    /** @var int[] */
+    var $inProgress = [];
     /** @var string[] */
     var $warnings = [];
     /** @var string[] */
@@ -1029,6 +1053,24 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     fputcsv($handle, $data, ",");
 
     fclose($handle);
+}
+
+function getProgressDuration($startTimeFilePath)
+{
+    $content = @file_get_contents($startTimeFilePath);
+    if ($content === false) {
+       return 0;
+    }
+
+    $startTime = intval($content);
+
+    $duration = time() - $startTime;
+
+    if ($duration < 0 || $startTime === 0) {
+       return 0;
+    }
+
+    return $duration;
 }
 
 function getBuildHash()
