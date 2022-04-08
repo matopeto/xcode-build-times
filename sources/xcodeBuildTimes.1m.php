@@ -124,6 +124,30 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
 } elseif ($arg === "config") {
     processConfigChange($argv, $configFilePath);
     die;
+} elseif ($arg == "configure") {
+    echo "Running `which php`\n";
+    $phpPath = exec("which php");
+    if ($phpPath === false || $phpPath === "") {
+        $path = getenv("PATH");
+        error_log("Unable to find path to PHP executable. It is in your PATH?\nPATH: $path");
+        exit(1);
+    }
+
+    echo "Found PHP executable: $phpPath\n";
+    echo "Updating Shebang\n";
+    $file = @file_get_contents(__FILE__);
+    if ($file === false) {
+        error_log("Unable to update Shebang");
+        exit(1);
+    }
+    $file = preg_replace("/^#!.*?\n/", "#!$phpPath\n", $file, 1);
+    if (file_put_contents(__FILE__, $file) === false) {
+        error_log("Unable to update Shebang");
+        exit(1);
+    }
+
+    echo "Shebang updated. Plugin is configured.";
+    die;
 }
 
 $config = new BuildTimesConfig($configFilePath);
@@ -1112,9 +1136,9 @@ function update($where, $showAlerts)
 
     $selfData = @file_get_contents(__FILE__, false);
     if ($selfData !== false) {
-        // Compare hash
-        $hash1 = hash("sha256", $data);
-        $hash2 = hash("sha256", $selfData);
+        // Compare hash (without shebangs)
+        $hash1 = hash("sha256", preg_replace("/^#!.*?\n/", "", $data, 1));
+        $hash2 = hash("sha256", preg_replace("/^#!.*?\n/", "", $selfData, 1));
         if ($hash1 === $hash2) {
             // Show alert message:
             error_log("No update available.");
@@ -1123,6 +1147,11 @@ function update($where, $showAlerts)
             }
             exit(1);
         }
+    }
+
+    // Move current shebang to updated file.
+    if (preg_match("/^(#!.*?)\n/", $selfData, $matches) !== false) {
+        $data = preg_replace("/^#!.*?\n/", "$matches[1]\n", $data, 1);
     }
 
     $updateFile = $where . DIRECTORY_SEPARATOR . Config::UPDATE_TMP_FILE_NAME;
