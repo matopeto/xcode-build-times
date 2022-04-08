@@ -1,27 +1,20 @@
 # Xcode build times
 
-⚠️ Monterey users -> see [Issue #17](https://github.com/matopeto/xcode-build-times/issues/17)
-TL;DR; -> You must install PHP -> `brew install php` and maybe switch Swiftbar shell to zsh
-
-------
-
-# Xcode build times
-
 ![](screenshots/menubar.png)
 
-Have you ever wondered how much time a day you spend waiting for Xcode to do your builds? Wonder no more, this [xbar](https://github.com/matryer/xbar)(the BitBar reboot) or [SwiftBar](https://github.com/swiftbar/SwiftBar/) plugin shows the time wasted right in your menu bar!
+Have you ever wondered how much time a day you spend waiting for Xcode to do your builds? Wonder no more, this [SwiftBar](https://github.com/swiftbar/SwiftBar/) or [xbar](https://github.com/matryer/xbar) (the BitBar reboot) plugin shows the time wasted right in your menu bar!
 
 ![](screenshots/menubar-extended.png)
 
 ## Installation
 
-You can use this plugin with xbar (the BitBar reboot) or newer Swiftbar (in development)
+You can use this plugin with Swiftbar or xbar (the BitBar reboot)
 
-So first install [xbar](https://github.com/matryer/xbar#get-started) or [SwiftBar](https://github.com/swiftbar/SwiftBar#how-to-get-swiftbar)
+So first install [SwiftBar](https://github.com/swiftbar/SwiftBar#how-to-get-swiftbar) or [xbar](https://github.com/matryer/xbar#get-started) (FYI: I am using SwiftBar, so some features are SwiftBar only) 
 
-On the first run select a directory you wish to use as your plugin directory, for example `~/BitBarPlugins`.
+On the first run select a directory you wish to use as your plugin directory, for example `~/SwiftBarPlugins`.
 
-If you are using macOS Monterey then you must install PHP, because it is not bundled in macOS anymore. see [Issue #17](https://github.com/matopeto/xcode-build-times/issues/17) e.g. from Homebrew: `brew install php`
+If you are using macOS Monterey then you must install PHP, because it is not bundled in macOS anymore. E.g. from Homebrew: `brew install php` and you must have path to `php` executable in PATH variable.
 
 ### Plugin installation
 
@@ -30,9 +23,15 @@ Download the `xcodeBuildTimes.1m.php` file from the `sources` folder in this rep
 You can do it manually or via terminal
 
 ```bash
-cd ~/BitBarPlugins
+cd ~/SwiftBarPlugins
 curl https://raw.githubusercontent.com/matopeto/xcode-build-times/master/sources/xcodeBuildTimes.1m.php --output xcodeBuildTimes.1m.php
 chmod +x xcodeBuildTimes.1m.php
+```
+
+Before the first usage of the plugin you must configure the plugin. Just run:
+
+```bash
+php xcodeBuildTimes.1m.php configure
 ```
 
 If you now refresh xbar/SwiftBar data you should see the script being loaded.
