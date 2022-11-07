@@ -14,6 +14,7 @@
 # <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
 # <swiftbar.hideDisablePlugin>true</swiftbar.hideDisablePlugin>
 # <swiftbar.hideSwiftBar>true</swiftbar.hideSwiftBar>
+# <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>
 
 final class Config
 {
@@ -21,6 +22,7 @@ final class Config
     const ICON_URL = "https://icons8.com";
 
     const ABOUT_URL = "https://github.com/matopeto/xcode-build-times";
+    const SWIFTBAR_URL = "https://github.com/swiftbar/SwiftBar";
 
     const UPDATE_URL = "https://raw.githubusercontent.com/matopeto/xcode-build-times/master/sources/xcodeBuildTimes.1m.php";
     const UPDATE_USER_AGENT = "matopeto/xcode-build-times";
@@ -36,9 +38,10 @@ final class Config
 
 final class Strings
 {
-    const WARNING_UNABLE_TO_READ_DATA_FILE = "Unable to read data file";
+    const WARNING_UNABLE_TO_READ_DATA_FILE = "Unable to read data file. that's ok as long as no build has been done yet";
     const WARNING_PROBLEM_WITH_DATA_FILE = "There is some problem with data";
     const WARNING_NO_DATA = "No data";
+    const WARNING_OLD_SWIFTBAR_VERSION = "Please use the latest SwiftBar for proper functionality";
     const ROW_WARNING = "⚠️ %s"; // %s will be replaced by warning message
 
     const ROW_HEADER_TODAY = "Today";
@@ -191,6 +194,11 @@ final class BuildTimesFileParser
     public function getOutput()
     {
         $result = new BuildTimesOutput();
+
+        $swiftBarVersion = getenv("SWIFTBAR_VERSION");
+        if ($swiftBarVersion !== false && version_compare($swiftBarVersion, "1.4.3", "<")) {
+            $result->warnings[] = Strings::WARNING_OLD_SWIFTBAR_VERSION . "| href=" . Config::SWIFTBAR_URL;
+        }
 
         // Read CSV
         $handle = @fopen($this->dataFile, "r");
