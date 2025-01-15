@@ -346,7 +346,7 @@ final class BuildTimesFileParser
         $projects = [];
         $rows = [];
         $problemWithData = false;
-        while (($row = fgetcsv($handle, 1000, ",")) !== FALSE) {
+        while (($row = fgetcsv($handle, 1000, ",", "\"", "")) !== FALSE) {
             if (count($row) < 3) {
                 $problemWithData = true;
                 continue;
@@ -1081,7 +1081,7 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
         exit(1);
     }
 
-    fputcsv($handle, $data, ",");
+    fputcsv($handle, $data, ",", "");
 
     fclose($handle);
 }
