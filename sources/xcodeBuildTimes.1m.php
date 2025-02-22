@@ -1028,7 +1028,7 @@ function markStart($startTimeFilePath)
 function markEnd($type, $startTimeFilePath, $dataFilePath)
 {
     $content = @file_get_contents($startTimeFilePath);
-    unlink($startTimeFilePath);
+    @unlink($startTimeFilePath);
     if ($content === false) {
         error_log("Unable to open file: $startTimeFilePath");
         exit(1);
@@ -1081,7 +1081,7 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
         exit(1);
     }
 
-    fputcsv($handle, $data, ",", "");
+    fputcsv($handle, $data, ",", "\"", "");
 
     fclose($handle);
 }
