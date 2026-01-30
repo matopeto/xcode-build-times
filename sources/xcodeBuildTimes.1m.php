@@ -67,6 +67,15 @@ final class Strings
     const ROW_BUILD_IN_PROGRESS = 'Build in progress: %s'; // %s will be replaced with current duration of build in progress
 
     const ROW_REFRESH = "Refresh";
+    const ROW_SHARE = "Share";
+
+    const SHARE_HEADER_TODAY = 'Xcode Build Times - Today, %s'; // %s - current date
+    const SHARE_HEADER_TODAY_FILTER = 'Xcode Build Times - Today (%1$s), %2$s'; // %1$s - filter, %2$s - current date
+    const SHARE_HEADER_TOTAL_SINCE = 'Xcode Build Times - Total, since: %s'; // %s - first date
+    const SHARE_HEADER_TOTAL_SINCE_FILTER = 'Xcode Build Times - Total, since: %1$s (%2$s)'; // %1$s - first date, %2$s - filter
+    const SHARE_HEADER_TOTAL = 'Xcode Build Times - Total';
+    const SHARE_HEADER_TOTAL_FILTER = 'Xcode Build Times - Total (%s)'; // %s - filter
+    const SHARE_FOOTER = 'Tracked with Xcode Build Times - %s'; // %s - ABOUT_URL
 
     const ROW_SETTINGS = "Settings";
     const ROW_SETTINGS_FILTER = "Filter";
@@ -126,6 +135,20 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
     die;
 } elseif ($arg === "config") {
     processConfigChange($argv, $configFilePath);
+    die;
+} elseif ($arg === "share") {
+    $mode = $argc > 2 ? $argv[2] : "today";
+    $config = new BuildTimesConfig($configFilePath);
+    $parser = new BuildTimesFileParser($dataFilePath, $startTimeFilesPattern, $config);
+    $data = $parser->getOutput();
+    $renderer = new BitBarRenderer($data, $config);
+    $text = $renderer->getShareText($mode);
+    $pipe = popen("pbcopy", "w");
+    if ($pipe !== false) {
+        fwrite($pipe, $text);
+        pclose($pipe);
+    }
+    showAlert("Copied to clipboard:\n\n" . $text);
     die;
 } elseif ($arg == "configure") {
     echo "Running `which php`\n";
@@ -819,6 +842,8 @@ final class BitBarRenderer
         $rows = [];
         $rows[] = "---";
         $rows[] = Strings::ROW_REFRESH . "| refresh=true";
+        $rows[] = Strings::ROW_SHARE . "| bash='" . __FILE__ . "' param1=share param2=today refresh=false terminal=false";
+        $rows[] = Strings::ROW_SHARE . "| bash='" . __FILE__ . "' param1=share param2=total refresh=false terminal=false alternate=true";
 
         $this->renderRows($rows);
 
@@ -923,6 +948,76 @@ final class BitBarRenderer
         } else {
             return $interval->format("%ad %hh");
         }
+    }
+
+    /**
+     * @param string $mode "today" or "total"
+     * @return string
+     */
+    public function getShareText($mode)
+    {
+        $isToday = $mode === "today";
+        $data = $isToday ? $this->data->todayData : $this->data->totalData;
+        $dailyData = $this->data->dailyData;
+
+        $lines = [];
+
+        // Header with filter and since info, matching normal render
+        $selectedFilter = array_merge($this->data->selectedWorkspaces, $this->data->selectedProjects);
+        $formattedFilter = implode(", ", array_map(function ($item) {
+            return $this->sanitizeName($item);
+        }, $selectedFilter));
+
+        if ($isToday) {
+            $todayDate = (new DateTime("now", $this->localTimeZone))->format(Config::DATE_FORMAT);
+            if (empty($selectedFilter)) {
+                $lines[] = sprintf(Strings::SHARE_HEADER_TODAY, $todayDate);
+            } else {
+                $lines[] = sprintf(Strings::SHARE_HEADER_TODAY_FILTER, $formattedFilter, $todayDate);
+            }
+        } else {
+            if ($this->data->totalData != null) {
+                $dateFrom = clone $this->data->totalData->dataFrom;
+                if ($this->localTimeZone !== null) {
+                    $dateFrom->setTimezone($this->localTimeZone);
+                }
+                $dateFromFormatted = $dateFrom !== null ? $dateFrom->format(Config::DATE_FORMAT) : "never";
+                if (empty($selectedFilter)) {
+                    $lines[] = sprintf(Strings::SHARE_HEADER_TOTAL_SINCE, $dateFromFormatted);
+                } else {
+                    $lines[] = sprintf(Strings::SHARE_HEADER_TOTAL_SINCE_FILTER, $dateFromFormatted, $formattedFilter);
+                }
+            } else {
+                if (empty($selectedFilter)) {
+                    $lines[] = Strings::SHARE_HEADER_TOTAL;
+                } else {
+                    $lines[] = sprintf(Strings::SHARE_HEADER_TOTAL_FILTER, $formattedFilter);
+                }
+            }
+        }
+
+        if ($data === null) {
+            $lines[] = Strings::ROW_BUILD_COUNTS_NO_BUILDS;
+        } else {
+            $lines[] = sprintf(Strings::ROW_BUILD_COUNTS, $data->buildCount, $data->successCount, $data->failCount);
+            $lines[] = sprintf(Strings::ROW_BUILD_TIME, $this->format($data->buildTime));
+            $lines[] = "  " . sprintf(Strings::ROW_SUCCESS_BUILD_TIME, $this->format($data->successBuildTime));
+            $lines[] = "  " . sprintf(Strings::ROW_FAIL_BUILD_TIME, $this->format($data->failBuildTime));
+            $lines[] = sprintf(Strings::ROW_AVERAGE_BUILD_TIME, $this->format($data->averageBuildTime));
+            $lines[] = "  " . sprintf(Strings::ROW_SUCCESS_BUILD_TIME, $this->format($data->averageSuccessBuildTime));
+            $lines[] = "  " . sprintf(Strings::ROW_FAIL_BUILD_TIME, $this->format($data->averageFailBuildTime));
+        }
+
+        if ($dailyData !== null) {
+            $lines[] = sprintf(Strings::ROW_DAILY_AVERAGE_BUILD_TIME, $this->format($dailyData->averageBuildTime), $dailyData->averageBuildCount);
+            $lines[] = "  " . sprintf(Strings::ROW_DAILY_SUCCESS_BUILD_TIME, $this->format($dailyData->averageSuccessBuildTime), $dailyData->averageSuccessCount);
+            $lines[] = "  " . sprintf(Strings::ROW_DAILY_FAIL_BUILD_TIME, $this->format($dailyData->averageFailBuildTime), $dailyData->averageFailCount);
+        }
+
+        $lines[] = "";
+        $lines[] = sprintf(Strings::SHARE_FOOTER, Config::ABOUT_URL);
+
+        return implode("\n", $lines);
     }
 
     private function getActionForProjectSelection($type, $name, $add)
