@@ -1,0 +1,14 @@
+<xbar.title>Xcode build times</xbar.title>
+<xbar.version>v1.0</xbar.version>
+<xbar.author>Mato Peto</xbar.author>
+<xbar.author.github>matopeto</xbar.author.github>
+<xbar.desc>Shows today's and total time you spend waiting to Xcode finish building.</xbar.desc>
+<xbar.image>https://raw.githubusercontent.com/matopeto/xcode-build-times/master/screenshots/menubar-extended.png</xbar.image>
+<xbar.dependencies>swift,xcode</xbar.dependencies>
+<xbar.abouturl>https://github.com/matopeto/xcode-build-timese</xbar.abouturl>
+<swiftbar.hideAbout>true</swiftbar.hideAbout>
+<swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
+<swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
+<swiftbar.hideDisablePlugin>true</swiftbar.hideDisablePlugin>
+<swiftbar.hideSwiftBar>true</swiftbar.hideSwiftBar>
+<swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>

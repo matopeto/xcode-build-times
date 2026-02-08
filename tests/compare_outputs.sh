@@ -5,14 +5,14 @@
 # Prerequisites:
 #   - PHP installed and in PATH
 #   - Swift compiled binary at sources/xcodeBuildTimes
-#     (run: swiftc sources/xcodeBuildTimes.1m.swift -o sources/xcodeBuildTimes -framework Foundation)
+#     (run: swiftc sources/xcodeBuildTimes.1m.swift -o sources/xcodeBuildTimes.1m -framework Foundation)
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PHP_SCRIPT="$PROJECT_DIR/sources/xcodeBuildTimes.1m.php"
-SWIFT_BINARY="$PROJECT_DIR/sources/xcodeBuildTimes"
+SWIFT_BINARY="$PROJECT_DIR/sources/xcodeBuildTimes.1m"
 
 # Colors
 RED='\033[0;31m'
@@ -44,7 +44,7 @@ fi
 
 if [ ! -x "$SWIFT_BINARY" ]; then
     echo "Compiling Swift binary..."
-    swiftc "$PROJECT_DIR/sources/xcodeBuildTimes.1m.swift" -o "$SWIFT_BINARY" -framework Foundation 2>/dev/null
+    swiftc "$PROJECT_DIR/sources/xcodeBuildTimes.1m.swift" -o "$SWIFT_BINARY" -framework Foundation 2>&1 | grep -v "was deprecated"
 fi
 
 # Create temp directory for test data
@@ -61,8 +61,8 @@ setup_test_env() {
 
     # Create symlinks/copies of the scripts in the test dir
     cp "$PHP_SCRIPT" "$test_dir/sources/xcodeBuildTimes.1m.php"
-    cp "$SWIFT_BINARY" "$test_dir/sources/xcodeBuildTimes"
-    chmod +x "$test_dir/sources/xcodeBuildTimes.1m.php" "$test_dir/sources/xcodeBuildTimes"
+    cp "$SWIFT_BINARY" "$test_dir/sources/xcodeBuildTimes.1m"
+    chmod +x "$test_dir/sources/xcodeBuildTimes.1m.php" "$test_dir/sources/xcodeBuildTimes.1m"
 
     echo "$test_dir"
 }
@@ -76,9 +76,9 @@ normalize_output() {
     local private_test_dir="/private$test_dir"
     sed \
         -e "s|$private_test_dir/sources/xcodeBuildTimes.1m.php|SELF|g" \
-        -e "s|$private_test_dir/sources/xcodeBuildTimes|SELF|g" \
+        -e "s|$private_test_dir/sources/xcodeBuildTimes.1m|SELF|g" \
         -e "s|$test_dir/sources/xcodeBuildTimes.1m.php|SELF|g" \
-        -e "s|$test_dir/sources/xcodeBuildTimes|SELF|g"
+        -e "s|$test_dir/sources/xcodeBuildTimes.1m|SELF|g"
 }
 
 # ============================================================================
@@ -99,7 +99,7 @@ EOF
 
     local php_out swift_out
     php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
-    swift_out=$("$test_dir/sources/xcodeBuildTimes" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
 
     if [ "$php_out" = "$swift_out" ]; then
         pass "Empty data — outputs match"
@@ -136,7 +136,7 @@ EOF
 
     local php_out swift_out
     php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
-    swift_out=$("$test_dir/sources/xcodeBuildTimes" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
 
     if [ "$php_out" = "$swift_out" ]; then
         pass "Basic render — outputs match"
@@ -177,7 +177,7 @@ EOF
 
     local php_out swift_out
     php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
-    swift_out=$("$test_dir/sources/xcodeBuildTimes" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
 
     if [ "$php_out" = "$swift_out" ]; then
         pass "Today data — outputs match"
@@ -209,7 +209,7 @@ EOF
 
     local php_out swift_out
     php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
-    swift_out=$("$test_dir/sources/xcodeBuildTimes" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
 
     if [ "$php_out" = "$swift_out" ]; then
         pass "Filter workspace — outputs match"
@@ -275,7 +275,7 @@ EOF
     rm -f "$test_dir/sources/.xcodeBuildTimes/buildStartTime."*
 
     # Test with Swift
-    "$test_dir/sources/xcodeBuildTimes" start 2>/dev/null
+    "$test_dir/sources/xcodeBuildTimes.1m" start 2>/dev/null
     local swift_start_files
     swift_start_files=$(ls "$test_dir/sources/.xcodeBuildTimes/" | grep "buildStartTime" | wc -l | tr -d ' ')
 
@@ -287,7 +287,7 @@ EOF
 
     sleep 1
 
-    "$test_dir/sources/xcodeBuildTimes" success 2>/dev/null
+    "$test_dir/sources/xcodeBuildTimes.1m" success 2>/dev/null
     local swift_start_after
     swift_start_after=$(ls "$test_dir/sources/.xcodeBuildTimes/" | grep "buildStartTime" | wc -l | tr -d ' ')
 
@@ -338,7 +338,7 @@ EOF
 EOF
 
     # Toggle workspace via Swift
-    "$test_dir/sources/xcodeBuildTimes" config filter_toggle workspace "MyApp.xcworkspace" set 2>/dev/null
+    "$test_dir/sources/xcodeBuildTimes.1m" config filter_toggle workspace "MyApp.xcworkspace" set 2>/dev/null
     local swift_config
     swift_config=$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin), sort_keys=True))" < "$test_dir/sources/.xcodeBuildTimes/config.json")
 
@@ -360,7 +360,7 @@ EOF
 }
 EOF
 
-    "$test_dir/sources/xcodeBuildTimes" config filter_toggle all - set 2>/dev/null
+    "$test_dir/sources/xcodeBuildTimes.1m" config filter_toggle all - set 2>/dev/null
     swift_config=$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin), sort_keys=True))" < "$test_dir/sources/.xcodeBuildTimes/config.json")
 
     if [ "$php_config" = "$swift_config" ]; then
@@ -393,7 +393,7 @@ EOF
 
     local php_out swift_out
     php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
-    swift_out=$("$test_dir/sources/xcodeBuildTimes" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
 
     if [ "$php_out" = "$swift_out" ]; then
         pass "Old date format — outputs match"
@@ -427,7 +427,7 @@ EOF
 
     local php_out swift_out
     php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
-    swift_out=$("$test_dir/sources/xcodeBuildTimes" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
 
     if [ "$php_out" = "$swift_out" ]; then
         pass "Time formatting (seconds/minutes/hours/days) — outputs match"
@@ -448,7 +448,7 @@ test_reset() {
 EOF
 
     # Reset via Swift
-    "$test_dir/sources/xcodeBuildTimes" reset 2>/dev/null
+    "$test_dir/sources/xcodeBuildTimes.1m" reset 2>/dev/null
 
     if [ ! -f "$test_dir/sources/.xcodeBuildTimes/buildTimes.csv" ]; then
         pass "Reset (Swift) — CSV file deleted"
@@ -474,7 +474,7 @@ EOF
 
     local php_out swift_out
     php_out=$(SWIFTBAR_VERSION="1.4.0" php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
-    swift_out=$(SWIFTBAR_VERSION="1.4.0" "$test_dir/sources/xcodeBuildTimes" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$(SWIFTBAR_VERSION="1.4.0" "$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
 
     if [ "$php_out" = "$swift_out" ]; then
         pass "SwiftBar version warning — outputs match"
@@ -536,7 +536,7 @@ EOF
 
     local php_out swift_out
     php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
-    swift_out=$("$test_dir/sources/xcodeBuildTimes" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
 
     if [ "$php_out" = "$swift_out" ]; then
         pass "Filter project — outputs match"
@@ -570,7 +570,7 @@ EOF
 
     local php_out swift_out
     php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
-    swift_out=$("$test_dir/sources/xcodeBuildTimes" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
 
     if [ "$php_out" = "$swift_out" ]; then
         pass "Malformed CSV — outputs match"
@@ -605,12 +605,112 @@ EOF
 
     local php_out swift_out
     php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
-    swift_out=$("$test_dir/sources/xcodeBuildTimes" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
 
     if [ "$php_out" = "$swift_out" ]; then
         pass "Daily averages — outputs match"
     else
         fail "Daily averages — outputs differ" "$(diff <(echo "$php_out") <(echo "$swift_out"))"
+    fi
+}
+
+# ============================================================================
+# Test 15: No config file (config.json does not exist)
+# ============================================================================
+test_no_config_file() {
+    local test_dir
+    test_dir=$(setup_test_env "no_config")
+
+    # Remove config.json so it doesn't exist
+    rm -f "$test_dir/sources/.xcodeBuildTimes/config.json"
+
+    # Write some CSV data
+    cat > "$test_dir/sources/.xcodeBuildTimes/buildTimes.csv" << 'EOF'
+2024-01-15T10:00:00+00:00,45,success,MyApp.xcworkspace,MyApp.xcodeproj,15.0,15A240
+2024-01-15T11:00:00+00:00,30,fail,MyApp.xcworkspace,MyApp.xcodeproj,15.0,15A240
+EOF
+
+    local php_out swift_out
+    php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
+
+    if [ "$php_out" = "$swift_out" ]; then
+        pass "No config file — outputs match"
+    else
+        fail "No config file — outputs differ" "$(diff <(echo "$php_out") <(echo "$swift_out"))"
+    fi
+}
+
+# ============================================================================
+# Test 16: Empty config file
+# ============================================================================
+test_empty_config_file() {
+    local test_dir
+    test_dir=$(setup_test_env "empty_config")
+
+    # Create an empty config file
+    : > "$test_dir/sources/.xcodeBuildTimes/config.json"
+
+    # Write some CSV data
+    cat > "$test_dir/sources/.xcodeBuildTimes/buildTimes.csv" << 'EOF'
+2024-01-15T10:00:00+00:00,45,success,MyApp.xcworkspace,MyApp.xcodeproj,15.0,15A240
+2024-01-15T11:00:00+00:00,30,fail,MyApp.xcworkspace,MyApp.xcodeproj,15.0,15A240
+EOF
+
+    local php_out swift_out
+    php_out=$(php "$test_dir/sources/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$test_dir/sources/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
+
+    if [ "$php_out" = "$swift_out" ]; then
+        pass "Empty config file — outputs match"
+    else
+        fail "Empty config file — outputs differ" "$(diff <(echo "$php_out") <(echo "$swift_out"))"
+    fi
+}
+
+# ============================================================================
+# Test 17: Symlink — binary symlinked from another directory
+# ============================================================================
+test_symlink() {
+    local test_dir
+    test_dir=$(setup_test_env "symlink")
+
+    cat > "$test_dir/sources/.xcodeBuildTimes/config.json" << 'EOF'
+{
+    "selectedProjects": [],
+    "selectedWorkspaces": [],
+    "localTimeZone": "UTC"
+}
+EOF
+
+    cat > "$test_dir/sources/.xcodeBuildTimes/buildTimes.csv" << 'EOF'
+2024-01-15T10:00:00+00:00,45,success,MyApp.xcworkspace,MyApp.xcodeproj,15.0,15A240
+2024-01-15T10:30:00+00:00,60,fail,MyApp.xcworkspace,MyApp.xcodeproj,15.0,15A240
+2024-01-16T09:00:00+00:00,30,success,MyApp.xcworkspace,MyApp.xcodeproj,15.0,15A240
+EOF
+
+    # Create a separate directory and symlink the scripts there
+    local symlink_dir="$TMPDIR_BASE/symlink_target"
+    mkdir -p "$symlink_dir"
+    ln -s "$test_dir/sources/xcodeBuildTimes.1m.php" "$symlink_dir/xcodeBuildTimes.1m.php"
+    ln -s "$test_dir/sources/xcodeBuildTimes.1m" "$symlink_dir/xcodeBuildTimes.1m"
+
+    # Run via symlink — should resolve symlink and read data from actual directory
+    local php_out swift_out
+    php_out=$(php "$symlink_dir/xcodeBuildTimes.1m.php" 2>/dev/null | normalize_output "$test_dir")
+    swift_out=$("$symlink_dir/xcodeBuildTimes.1m" 2>/dev/null | normalize_output "$test_dir")
+
+    if [ "$php_out" = "$swift_out" ]; then
+        pass "Symlink render — outputs match"
+    else
+        fail "Symlink render — outputs differ" "$(diff <(echo "$php_out") <(echo "$swift_out"))"
+    fi
+
+    # Also verify the symlinked binary actually found data (not empty/warning output)
+    if echo "$swift_out" | grep -q "Builds "; then
+        pass "Symlink render — Swift resolved symlink and found data"
+    else
+        fail "Symlink render — Swift did not find data via symlink" "Output: $(echo "$swift_out" | head -5)"
     fi
 }
 
@@ -636,6 +736,9 @@ test_swiftbar_warning
 test_share_today
 test_malformed_csv
 test_daily_averages
+test_no_config_file
+test_empty_config_file
+test_symlink
 
 echo ""
 echo "========================================="

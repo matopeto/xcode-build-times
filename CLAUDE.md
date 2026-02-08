@@ -31,17 +31,23 @@ php sources/xcodeBuildTimes.1m.php config filter_toggle [all|workspace|project] 
 
 ```bash
 # Compile
-swiftc sources/xcodeBuildTimes.1m.swift -o sources/xcodeBuildTimes -framework Foundation
+swiftc sources/xcodeBuildTimes.1m.swift -o sources/xcodeBuildTimes.1m -framework Foundation
 
 # All the same commands work with the compiled binary
-sources/xcodeBuildTimes                # Render menu bar output
-sources/xcodeBuildTimes start          # Mark build start
-sources/xcodeBuildTimes success        # Mark build success
-sources/xcodeBuildTimes fail           # Mark build failure
-sources/xcodeBuildTimes reset          # Clear all data
-sources/xcodeBuildTimes update         # Self-update from GitHub
-sources/xcodeBuildTimes share [today|total]
-sources/xcodeBuildTimes config filter_toggle [all|workspace|project] [name] [set|add]
+sources/xcodeBuildTimes.1m                # Render menu bar output
+sources/xcodeBuildTimes.1m start          # Mark build start
+sources/xcodeBuildTimes.1m success        # Mark build success
+sources/xcodeBuildTimes.1m fail           # Mark build failure
+sources/xcodeBuildTimes.1m reset          # Clear all data
+sources/xcodeBuildTimes.1m update         # Self-update from GitHub
+sources/xcodeBuildTimes.1m share [today|total]
+sources/xcodeBuildTimes.1m config filter_toggle [all|workspace|project] [name] [set|add]
+
+# Set SwiftBar metadata on compiled binary (binary can't embed // comments)
+xattr -w "com.ameba.SwiftBar" "$(cat sources/swiftbar-metadata.txt | base64)" sources/xcodeBuildTimes.1m
+
+# Symlink into SwiftBar plugins directory
+ln -s "$(pwd)/sources/xcodeBuildTimes.1m" ~/Library/Application\ Support/SwiftBar/Plugins/xcodeBuildTimes.1m
 ```
 
 ### Tests

@@ -5,7 +5,7 @@
 ### Full Swift rewrite (`sources/xcodeBuildTimes.1m.swift`)
 - Single-file Swift script mirroring all PHP functionality
 - Shares the same data files as PHP: `buildTimes.csv`, `config.json`, `buildStartTime.*`
-- Compiled binary at `sources/xcodeBuildTimes`
+- Compiled binary at `sources/xcodeBuildTimes.1m`
 
 ### Implemented features
 - **Render** — menu bar output with all sections (today, total, daily averages, last build, in-progress, warnings, filters, settings, about)
@@ -95,11 +95,11 @@ Both PHP's `intval()` and Swift's `/` truncate toward zero for positive numbers.
 
 ```bash
 # Compile
-swiftc sources/xcodeBuildTimes.1m.swift -o sources/xcodeBuildTimes -framework Foundation
+swiftc sources/xcodeBuildTimes.1m.swift -o sources/xcodeBuildTimes.1m -framework Foundation
 
 # Run tests
 bash tests/compare_outputs.sh
 
 # Compare against real data
-diff <(php sources/xcodeBuildTimes.1m.php 2>/dev/null) <(sources/xcodeBuildTimes 2>/dev/null)
+diff <(php sources/xcodeBuildTimes.1m.php 2>/dev/null) <(sources/xcodeBuildTimes.1m 2>/dev/null)
 ```
