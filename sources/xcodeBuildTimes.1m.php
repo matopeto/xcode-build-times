@@ -1,4 +1,4 @@
-#!/usr/bin/env php
+#!/opt/homebrew/bin/php
 <?php
 
 # <bitbar.title>Xcode build times</bitbar.title>
@@ -634,16 +634,35 @@ final class BuildTimesConfig
     {
         // On macOS /etc/localtime is symlink to file with time zone info, e.g.
         // /etc/localtime -> /var/db/timezone/zoneinfo/Europe/Prague
-        // we read this file to determine local time zone
+        // we read this file to determine local time zone.
+        //
+        // On macOS 15+ (Sequoia), realpath() resolves the full symlink chain to
+        // /usr/share/zoneinfo.default/Europe/Prague — which does NOT contain
+        // "zoneinfo/" and breaks the regex. As a fallback, we use readlink()
+        // which returns the immediate symlink target (/var/db/timezone/zoneinfo/...)
+        // without resolving further symlinks.
         $link = "/etc/localtime";
         if (is_link($link)) {
+            // Try realpath first (works on older macOS)
             $realPath = realpath($link);
             $timeZone = preg_replace("~.*zoneinfo/~", "", $realPath);
+            if ($timeZone !== $realPath) {
+                try {
+                    return new DateTimeZone($timeZone);
+                } catch (Exception $e) {
+                }
+            }
 
-            try {
-                return new DateTimeZone($timeZone);
-            } catch (Exception $e) {
-                return null;
+            // Fallback: read symlink target directly (works on macOS 15+)
+            $target = readlink($link);
+            if ($target !== false) {
+                $timeZone = preg_replace("~.*zoneinfo/~", "", $target);
+                if ($timeZone !== $target) {
+                    try {
+                        return new DateTimeZone($timeZone);
+                    } catch (Exception $e) {
+                    }
+                }
             }
         }
 
