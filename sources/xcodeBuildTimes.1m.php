@@ -739,13 +739,13 @@ final class BuildTimesConfig
      */
     private function getLocalTimeZone()
     {
-        // On macOS /etc/localtime is symlink to file with time zone info, e.g.
-        // /etc/localtime -> /var/db/timezone/zoneinfo/Europe/Prague
-        // we read this file to determine local time zone
+        // On macOS /etc/localtime is symlink to file with time zone info.
+        // realpath() resolves to /var/db/timezone/zoneinfo/... on older macOS
+        // or /usr/share/zoneinfo.default/... on macOS 15+.
         $link = "/etc/localtime";
         if (is_link($link)) {
             $realPath = realpath($link);
-            $timeZone = preg_replace("~.*zoneinfo/~", "", $realPath);
+            $timeZone = preg_replace("~.*zoneinfo(\.default)?/~", "", $realPath);
 
             try {
                 return new DateTimeZone($timeZone);
