@@ -80,9 +80,21 @@ final class Strings
     const ROW_SETTINGS = "Settings";
     const ROW_SETTINGS_FILTER = "Filter";
     const ROW_SETTINGS_FILTER_ALL = "Show all";
+    const ROW_SETTINGS_DATA = "Data";
+    const ROW_SETTINGS_DATA_EXPORT = "Export";
+    const ROW_SETTINGS_DATA_IMPORT = "Import";
+    const ROW_SETTINGS_DATA_OPEN_LOCATION = "Open Data Location";
     const ROW_SETTINGS_RESET = "Reset";
     const ROW_SETTINGS_RESET_REALLY = "Really?";
     const ROW_SETTINGS_RESET_REALLY_YES = "Yes";
+
+    const IMPORT_ALERT_CONFIRM = "This will replace all existing build data. Continue?";
+    const IMPORT_ALERT_SUCCESS = "Data imported successfully.";
+    const IMPORT_ALERT_FAIL = "Unable to import data.\n\n%s"; // %s will be replaced with error message
+    const IMPORT_ALERT_INVALID = "Selected file is not a valid build times CSV.";
+    const EXPORT_ALERT_SUCCESS = "Data exported successfully.";
+    const EXPORT_ALERT_FAIL = "Unable to export data.\n\n%s"; // %s will be replaced with error message
+    const EXPORT_ALERT_NO_DATA = "No data file to export.";
 
 
     const ROW_ABOUT = "About";
@@ -149,6 +161,44 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
         pclose($pipe);
     }
     showAlert("Copied to clipboard:\n\n" . $text);
+    die;
+} elseif ($arg === "export") {
+    if (!file_exists($dataFilePath)) {
+        showAlert(Strings::EXPORT_ALERT_NO_DATA);
+        die;
+    }
+    $output = @trim(shell_exec("osascript -e 'POSIX path of (choose file name with prompt \"Export Build Times Data\" default name \"buildTimes.csv\")'") ?? "");
+    if ($output !== "") {
+        $copyError = copyFile($dataFilePath, $output);
+        if ($copyError === null) {
+            showAlert(Strings::EXPORT_ALERT_SUCCESS);
+        } else {
+            showAlert(sprintf(Strings::EXPORT_ALERT_FAIL, $copyError));
+        }
+    }
+    die;
+} elseif ($arg === "import") {
+    $selectedFile = @trim(shell_exec("osascript -e 'POSIX path of (choose file of type {\"public.comma-separated-values-text\"} with prompt \"Import Build Times Data\")'") ?? "");
+    if ($selectedFile === "" || !file_exists($selectedFile)) {
+        die;
+    }
+    if (!BuildTimesFileParser::isValidFile($selectedFile)) {
+        showAlert(Strings::IMPORT_ALERT_INVALID);
+        die;
+    }
+    $confirmed = @trim(shell_exec("osascript -e " . escapeshellarg('display alert "' . Strings::UPDATE_ALERT_TITLE . '" message "' . Strings::IMPORT_ALERT_CONFIRM . '" buttons {"Cancel", "OK"} default button "Cancel"')) ?? "");
+    if (strpos($confirmed, "OK") === false) {
+        die;
+    }
+    $copyError = copyFile($selectedFile, $dataFilePath);
+    if ($copyError === null) {
+        showAlert(Strings::IMPORT_ALERT_SUCCESS);
+    } else {
+        showAlert(sprintf(Strings::IMPORT_ALERT_FAIL, $copyError));
+    }
+    die;
+} elseif ($arg === "openDataLocation") {
+    exec("open " . escapeshellarg($dataDirectory));
     die;
 } elseif ($arg == "configure") {
     echo "Running `which php`\n";
@@ -295,7 +345,7 @@ final class BuildTimesFileParser
                 $todayKey = (new DateTime("now", $this->localTimeZone))->format("Y-m-d");
             } catch (Exception $ex) {
             }
-            
+
             if ($todayKey !== null && key_exists($todayKey, $rows)) {
                 // Today data
                 $todayRows = $rows[$todayKey];
@@ -358,6 +408,71 @@ final class BuildTimesFileParser
     }
 
     /**
+     * @param string $filePath
+     * @return bool
+     */
+    public static function isValidFile($filePath)
+    {
+        $handle = @fopen($filePath, "r");
+        if ($handle === false) {
+            return false;
+        }
+
+        $hasRows = false;
+        while (($row = fgetcsv($handle, 1000, ",", "\"", "")) !== false) {
+            if (self::parseRow($row) === false) {
+                fclose($handle);
+                return false;
+            }
+            $hasRows = true;
+        }
+
+        fclose($handle);
+        return $hasRows;
+    }
+
+    /**
+     * @param array $row
+     * @return DataRow|false - parsed DataRow on success, false on invalid row
+     */
+    private static function parseRow($row)
+    {
+        if (count($row) < 3) {
+            return false;
+        }
+        if (!preg_match('~[0-9]+~', $row[1])) {
+            return false;
+        }
+        if (!preg_match('~fail|success~', $row[2])) {
+            return false;
+        }
+        if (preg_match('~[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}~', $row[0])) {
+            // Old format (without time zone)
+            $date = DateTime::createFromFormat("Y-m-d H:i:s", $row[0]);
+            if ($date == false) {
+                return false;
+            }
+        } else {
+            // New format (with time zone)
+            try {
+                $date = new DateTime($row[0]);
+            } catch (Exception $e) {
+                return false;
+            }
+        }
+
+        $dataRow = new DataRow();
+        $dataRow->date = $date;
+        $dataRow->count = intval($row[1]);
+        $dataRow->type = $row[2];
+        if (count($row) >= 5) {
+            $dataRow->workspace = $row[3];
+            $dataRow->project = $row[4];
+        }
+        return $dataRow;
+    }
+
+    /**
      * @param resource $handle
      *
      * @param BuildTimesConfig $config
@@ -370,59 +485,20 @@ final class BuildTimesFileParser
         $rows = [];
         $problemWithData = false;
         while (($row = fgetcsv($handle, 1000, ",", "\"", "")) !== FALSE) {
-            if (count($row) < 3) {
+            $dataRow = self::parseRow($row);
+            if ($dataRow === false) {
                 $problemWithData = true;
                 continue;
             }
 
-            $dateInOldFormat = false;
-            if (preg_match('~[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}~', $row[0])) {
-                $dateInOldFormat = true;
-            }
-
-            if (!preg_match('~[0-9]+~', $row[1])) {
-                $problemWithData = true;
-                continue;
-            }
-
-            if (!preg_match('~fail|success~', $row[2])) {
-                $problemWithData = true;
-                continue;
-            }
-
-            /** @var DateTime $date */
-            $date = NULL;
-
-            $dataRow = new DataRow();
-
-            if ($dateInOldFormat) {
-                // Old format (without time zone)
-                $date = DateTime::createFromFormat("Y-m-d H:i:s", $row[0]);
-                if ($date == false) {
-                    $problemWithData = true;
-                    continue;
-                }
-            } else {
-                // New format (with time zone)
-                try {
-                    $date = new DateTime($row[0]);
-                } catch (Exception $e) {
-                    $problemWithData = true;
-                    continue;
-                }
-            }
-
-            $dataRow->date = $date;
-            $dataRow->count = intval($row[1]);
-            $dataRow->type = $row[2];
-            if (count($row) >= 5) {
-                $dataRow->workspace = $row[3];
-                $dataRow->project = $row[4];
+            if ($dataRow->workspace !== null) {
                 $workspaces[$dataRow->workspace] = true;
+            }
+            if ($dataRow->project !== null) {
                 $projects[$dataRow->project] = true;
             }
 
-            $keyDate = clone $date;
+            $keyDate = clone $dataRow->date;
             if ($this->localTimeZone !== null) {
                 $keyDate->setTimezone($this->localTimeZone);
             }
@@ -860,6 +936,10 @@ final class BitBarRenderer
         $this->renderFilter();
 
         $rows = [];
+        $rows[] = "-- " . Strings::ROW_SETTINGS_DATA;
+        $rows[] = "---- " . Strings::ROW_SETTINGS_DATA_EXPORT . "| bash='" . __FILE__ . "' param1=export refresh=false terminal=false";
+        $rows[] = "---- " . Strings::ROW_SETTINGS_DATA_IMPORT . "| bash='" . __FILE__ . "' param1=import refresh=true terminal=false";
+        $rows[] = "---- " . Strings::ROW_SETTINGS_DATA_OPEN_LOCATION . "| bash='" . __FILE__ . "' param1=openDataLocation refresh=false terminal=false";
         $rows[] = "-- " . Strings::ROW_SETTINGS_RESET;
         $rows[] = "---- " . Strings::ROW_SETTINGS_RESET_REALLY;
         $rows[] = "------ " . Strings::ROW_SETTINGS_RESET_REALLY_YES . "| bash='" . __FILE__ . "' param1=reset refresh=true terminal=false";
@@ -1339,6 +1419,24 @@ function processConfigChange($argv, $configFilePath)
             }
             break;
     }
+}
+
+/**
+ * @param string $source
+ * @param string $destination
+ * @return string|null - error message on failure, null on success
+ */
+function copyFile($source, $destination) {
+    $error = null;
+    set_error_handler(function ($errno, $errstr) use (&$error) {
+        $error = $errstr;
+    });
+    $result = copy($source, $destination);
+    restore_error_handler();
+    if (!$result && $error === null) {
+        $error = "Unknown error";
+    }
+    return $result ? null : $error;
 }
 
 /**
