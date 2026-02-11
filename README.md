@@ -40,6 +40,14 @@ If you now refresh xbar/SwiftBar data you should see the script being loaded.
 
 The final step is to make Xcode call the script on every build. 
 
+#### Xcode 26 and newer
+
+In Xcode menu open `Xcode` | `Behaviors` | `Edit Behaviors`, then select `Build` and set `Run Script` to the plugin file for sections "Starts", "Succeeds" and "Fails"
+
+![](screenshots/xcode-26.png)
+
+#### Older Xcode
+
 To do this open `Preferences` | `Behaviors` in Xcode and set the script to `Run` when the `Build` starts
 
 ![](screenshots/xcode-start.png)
