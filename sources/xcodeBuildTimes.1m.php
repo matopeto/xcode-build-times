@@ -408,8 +408,11 @@ final class BuildTimesFileParser
     }
 
     /**
-     * @param string $filePath
-     * @return bool
+     * Validates that the given file is a valid build times CSV.
+     * Returns true if all rows are valid and the file is not empty.
+     *
+     * @param string $filePath Path to the CSV file to validate
+     * @return bool true if the file is a valid build times CSV, false otherwise
      */
     public static function isValidFile($filePath)
     {
@@ -432,8 +435,11 @@ final class BuildTimesFileParser
     }
 
     /**
-     * @param array $row
-     * @return DataRow|false - parsed DataRow on success, false on invalid row
+     * Parses and validates a single CSV row into a DataRow.
+     * Supports both old format (without time zone) and new format (ISO 8601 with time zone).
+     *
+     * @param string[] $row CSV row as an array of strings
+     * @return DataRow|false Parsed DataRow on success, false on invalid row
      */
     private static function parseRow($row)
     {
@@ -583,22 +589,27 @@ final class BuildTimesFileParser
 
 final class BuildTimesConfig
 {
-    /** @var [string] */
+    /** @var string[] */
     var $selectedWorkspaces = [];
 
-    /** @var [string] */
+    /** @var string[] */
     var $selectedProjects = [];
 
     /** @var DateTimeZone|null */
     var $localTimeZone = null;
 
-    /** @var Bool */
+    /** @var bool */
     private $localTimeZoneAutodetect = true;
 
     const selectedWorkspacesKey = "selectedWorkspaces";
     const selectedProjectsKey = "selectedProjects";
     const selectedLocalTimeZoneKey = "localTimeZone";
 
+    /**
+     * Loads configuration from JSON file.
+     *
+     * @param string $configFile Path to the config JSON file
+     */
     public function __construct($configFile)
     {
         $data = @file_get_contents($configFile);
@@ -647,6 +658,12 @@ final class BuildTimesConfig
         }
     }
 
+    /**
+     * Toggles workspace selection. If add is false, replaces current selection.
+     *
+     * @param string $name Workspace name
+     * @param bool $add Whether to add to current selection or replace it
+     */
     function toggleWorkspace($name, $add)
     {
         $key = array_search($name, $this->selectedWorkspaces, true);
@@ -662,6 +679,12 @@ final class BuildTimesConfig
         }
     }
 
+    /**
+     * Toggles project selection. If add is false, replaces current selection.
+     *
+     * @param string $name Project name
+     * @param bool $add Whether to add to current selection or replace it
+     */
     function toggleProject($name, $add)
     {
         $key = array_search($name, $this->selectedProjects, true);
@@ -677,12 +700,20 @@ final class BuildTimesConfig
         }
     }
 
+    /**
+     * Clears all workspace and project selections (show all).
+     */
     function selectAll()
     {
         $this->selectedWorkspaces = [];
         $this->selectedProjects = [];
     }
 
+    /**
+     * Saves current configuration to JSON file.
+     *
+     * @param string $configFile Path to the config JSON file
+     */
     function save($configFile)
     {
         $dataToSave = [
@@ -736,8 +767,8 @@ final class BitBarRenderer
     private $localTimeZone;
 
     /**
-     * @param $data BuildTimesOutput
-     * @param $config BuildTimesConfig
+     * @param BuildTimesOutput $data Parsed build times data
+     * @param BuildTimesConfig $config User configuration
      */
     public function __construct($data, $config)
     {
@@ -745,6 +776,9 @@ final class BitBarRenderer
         $this->localTimeZone = $config->localTimeZone;
     }
 
+    /**
+     * Renders the complete menu bar output.
+     */
     public function render()
     {
         $this->renderHeader();
@@ -752,6 +786,9 @@ final class BitBarRenderer
         $this->renderFooter();
     }
 
+    /**
+     * Renders the menu bar header with today's build time and icon.
+     */
     private function renderHeader()
     {
         $row = "";
@@ -766,6 +803,9 @@ final class BitBarRenderer
         $this->renderRows([$row, "---"]);
     }
 
+    /**
+     * Renders the main content section with build statistics.
+     */
     private function renderContent()
     {
         $rows = [];
@@ -913,6 +953,9 @@ final class BitBarRenderer
         return sprintf($title, $formatted);
     }
 
+    /**
+     * Renders the footer with refresh, share, settings, and about sections.
+     */
     private function renderFooter()
     {
         $rows = [];
@@ -927,6 +970,9 @@ final class BitBarRenderer
         $this->renderAbout();
     }
 
+    /**
+     * Renders the Settings submenu with filter, data, and reset options.
+     */
     private function renderPreferences()
     {
         $rows = [];
@@ -946,6 +992,9 @@ final class BitBarRenderer
         $this->renderRows($rows);
     }
 
+    /**
+     * Renders the workspace/project filter submenu.
+     */
     private function renderFilter()
     {
         $check = "✔ ";
@@ -982,11 +1031,20 @@ final class BitBarRenderer
         $this->renderRows($rows);
     }
 
+    /**
+     * Sanitizes a name for display in the menu bar by replacing newlines and pipes.
+     *
+     * @param string $name Name to sanitize
+     * @return string Sanitized name
+     */
     private function sanitizeName($name)
     {
         return preg_replace('~[\\n|]~', "_", $name);
     }
 
+    /**
+     * Renders the About submenu with source code, icon, and update links.
+     */
     private function renderAbout()
     {
         $rows = [];
@@ -1100,6 +1158,14 @@ final class BitBarRenderer
         return implode("\n", $lines);
     }
 
+    /**
+     * Returns the SwiftBar action string for a filter selection menu item.
+     *
+     * @param string $type Selection type ("all", "workspace", or "project")
+     * @param string $name Workspace or project name
+     * @param bool $add Whether to add to current selection or replace it
+     * @return string SwiftBar action string, or empty string if name contains unsupported characters
+     */
     private function getActionForProjectSelection($type, $name, $add)
     {
         // Bitbar doesn't handle correctly " and ' in parameters (maybe other caharcters) and no way to correctly escape
@@ -1195,11 +1261,23 @@ final class DataRow
     var $project;
 }
 
+/**
+ * Records the start time of a build by writing the current timestamp to a file.
+ *
+ * @param string $startTimeFilePath Path to the start time file
+ */
 function markStart($startTimeFilePath)
 {
     @file_put_contents($startTimeFilePath, "" . time());
 }
 
+/**
+ * Records the end of a build by calculating duration and appending a row to the CSV data file.
+ *
+ * @param string $type Build result type ("success" or "fail")
+ * @param string $startTimeFilePath Path to the start time file
+ * @param string $dataFilePath Path to the CSV data file
+ */
 function markEnd($type, $startTimeFilePath, $dataFilePath)
 {
     $content = @file_get_contents($startTimeFilePath);
@@ -1261,6 +1339,12 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     fclose($handle);
 }
 
+/**
+ * Returns the duration in seconds of a build in progress.
+ *
+ * @param string $startTimeFilePath Path to the start time file
+ * @return int Duration in seconds, or 0 if the file is invalid
+ */
 function getProgressDuration($startTimeFilePath)
 {
     $content = @file_get_contents($startTimeFilePath);
@@ -1279,6 +1363,11 @@ function getProgressDuration($startTimeFilePath)
     return $duration;
 }
 
+/**
+ * Returns an MD5 hash identifying the current build based on workspace and project paths.
+ *
+ * @return string MD5 hash string
+ */
 function getBuildHash()
 {
     $buildHash = "";
@@ -1294,6 +1383,12 @@ function getBuildHash()
     return md5($buildHash);
 }
 
+/**
+ * Downloads and installs the latest version of this plugin from GitHub.
+ *
+ * @param string $where Directory to store the temporary update file
+ * @param bool $showAlerts Whether to show macOS alert dialogs for status messages
+ */
 function update($where, $showAlerts)
 {
     $options = array(
@@ -1381,12 +1476,23 @@ function update($where, $showAlerts)
     exit(0);
 }
 
+/**
+ * Displays a macOS alert dialog with the given message.
+ *
+ * @param string $message Alert message to display
+ */
 function showAlert($message)
 {
     $command = "osascript -e " . escapeshellarg('display alert "' . str_replace('"', '\"', Strings::UPDATE_ALERT_TITLE) . '" message "' . str_replace('"', '\"', $message) . '"') . "> /dev/null 2>&1 &";
     exec($command);
 }
 
+/**
+ * Processes a configuration change command from CLI arguments.
+ *
+ * @param string[] $argv CLI arguments
+ * @param string $configFilePath Path to the config JSON file
+ */
 function processConfigChange($argv, $configFilePath)
 {
     if (count($argv) < 3) {
@@ -1422,9 +1528,11 @@ function processConfigChange($argv, $configFilePath)
 }
 
 /**
- * @param string $source
- * @param string $destination
- * @return string|null - error message on failure, null on success
+ * Copies a file from source to destination, capturing any error message on failure.
+ *
+ * @param string $source Path to the source file
+ * @param string $destination Path to the destination file
+ * @return string|null Error message on failure, null on success
  */
 function copyFile($source, $destination) {
     $error = null;
