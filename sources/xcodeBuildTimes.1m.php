@@ -1274,6 +1274,7 @@ final class DataRow
 function markStart($startTimeFilePath)
 {
     @file_put_contents($startTimeFilePath, "" . time());
+    refreshSwiftBar();
 }
 
 /**
@@ -1341,6 +1342,16 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     fputcsv($handle, $data, ",", "\"", "");
 
     fclose($handle);
+    refreshSwiftBar();
+}
+
+/**
+ * Refreshes the SwiftBar plugin by calling the SwiftBar URL scheme.
+ */
+function refreshSwiftBar()
+{
+    $pluginName = basename(__FILE__);
+    @exec("open " . escapeshellarg("swiftbar://refreshplugin?name=$pluginName") . " > /dev/null 2>&1 &");
 }
 
 /**
