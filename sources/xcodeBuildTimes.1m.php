@@ -8,7 +8,7 @@
 # <bitbar.desc>Shows today's and total time you spend waiting to Xcode finish building.</bitbar.desc>
 # <bitbar.image>https://raw.githubusercontent.com/matopeto/xcode-build-times/master/screenshots/menubar-extended.png</bitbar.image>
 # <bitbar.dependencies>php,xcode</bitbar.dependencies>
-# <bitbar.abouturl>https://github.com/matopeto/xcode-build-timese</bitbar.abouturl>
+# <bitbar.abouturl>https://github.com/matopeto/xcode-build-times</bitbar.abouturl>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 # <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
@@ -123,7 +123,10 @@ $startTimeFilesPattern = $startTimeFilePathWithoutHash . "\.*";
 $startTimeFilePath = $startTimeFilePathWithoutHash . "." . $buildHash;
 
 if (!file_exists($dataDirectory)) {
-    mkdir($dataDirectory);
+    if (!@mkdir($dataDirectory)) {
+        error_log("Unable to create data directory: $dataDirectory");
+        exit(1);
+    }
 }
 
 $idAlertMessage = getenv("IDEAlertMessage");
@@ -186,7 +189,7 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
         showAlert(Strings::IMPORT_ALERT_INVALID);
         die;
     }
-    $confirmed = @trim(shell_exec("osascript -e " . escapeshellarg('display alert "' . Strings::UPDATE_ALERT_TITLE . '" message "' . Strings::IMPORT_ALERT_CONFIRM . '" buttons {"Cancel", "OK"} default button "Cancel"')) ?? "");
+    $confirmed = @trim(shell_exec("osascript -e " . escapeshellarg('display alert "' . escapeAppleScript(Strings::UPDATE_ALERT_TITLE) . '" message "' . escapeAppleScript(Strings::IMPORT_ALERT_CONFIRM) . '" buttons {"Cancel", "OK"} default button "Cancel"')) ?? "");
     if (strpos($confirmed, "OK") === false) {
         die;
     }
@@ -200,7 +203,7 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
 } elseif ($arg === "openDataLocation") {
     exec("open " . escapeshellarg($dataDirectory));
     die;
-} elseif ($arg == "configure") {
+} elseif ($arg === "configure") {
     echo "Running `which php`\n";
     $phpPath = exec("which php");
     if ($phpPath === false || $phpPath === "") {
@@ -401,6 +404,8 @@ final class BuildTimesFileParser
             $duration = getProgressDuration($file);
             if ($duration > 0 && $duration < 86400) { // We skip very long durations, probably old not removed start files.
                 $result->inProgress[] = $duration;
+            } elseif ($duration >= 86400) {
+                @unlink($file);
             }
         }
 
@@ -1308,8 +1313,7 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     $developerDirectory = getenv("XcodeDeveloperDirectory");
 
     if ($developerDirectory !== false) {
-        $xcodeBuild = "build";
-        $xcodeBuild = "version";
+        $xcodeBuild = "";
         // Get Xcode version and build from version plist
         $plist = @simplexml_load_file($developerDirectory . "/../version.plist");
         if ($plist !== false) {
@@ -1428,7 +1432,7 @@ function update($where, $showAlerts)
     }
 
     // Move current shebang to updated file.
-    if (preg_match("/^(#!.*?)\n/", $selfData, $matches) !== false) {
+    if (preg_match("/^(#!.*?)\n/", $selfData, $matches) === 1) {
         $data = preg_replace("/^#!.*?\n/", "$matches[1]\n", $data, 1);
     }
 
@@ -1481,9 +1485,16 @@ function update($where, $showAlerts)
  *
  * @param string $message Alert message to display
  */
+function escapeAppleScript($string)
+{
+    return str_replace(['\\', '"'], ['\\\\', '\\"'], $string);
+}
+
 function showAlert($message)
 {
-    $command = "osascript -e " . escapeshellarg('display alert "' . str_replace('"', '\"', Strings::UPDATE_ALERT_TITLE) . '" message "' . str_replace('"', '\"', $message) . '"') . "> /dev/null 2>&1 &";
+    $title = escapeAppleScript(Strings::UPDATE_ALERT_TITLE);
+    $message = escapeAppleScript($message);
+    $command = "osascript -e " . escapeshellarg('display alert "' . $title . '" message "' . $message . '"') . " > /dev/null 2>&1 &";
     exec($command);
 }
 
