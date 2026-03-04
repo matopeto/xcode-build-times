@@ -798,7 +798,8 @@ final class BitBarRenderer
     {
         $row = "";
         $buildTime = @$this->data->todayData->buildTime ?: 0;
-        $row .= $this->format($buildTime);
+        $inProgressTime = array_sum($this->data->inProgress);
+        $row .= $this->format($buildTime + $inProgressTime);
 
         if (count($this->data->warnings) > 0) {
             $row .= " ⚠️";
