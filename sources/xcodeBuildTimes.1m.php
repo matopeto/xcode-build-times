@@ -129,24 +129,25 @@ if (!file_exists($dataDirectory)) {
     }
 }
 
+$mockCommands = getenv("MOCK_COMMANDS") !== false;
 $idAlertMessage = getenv("IDEAlertMessage");
 $arg = $argc > 1 ? $argv[1] : null;
 
 if ($idAlertMessage === "Build Started" || $arg === "start") {
-    markStart($startTimeFilePath);
+    markStart($startTimeFilePath, $mockCommands);
     die;
 } elseif ($idAlertMessage === "Build Succeeded" || $arg === "success") {
-    markEnd("success", $startTimeFilePath, $dataFilePath);
+    markEnd("success", $startTimeFilePath, $dataFilePath, $mockCommands);
     die;
 } elseif ($idAlertMessage === "Build Failed" || $arg === "fail") {
-    markEnd("fail", $startTimeFilePath, $dataFilePath);
+    markEnd("fail", $startTimeFilePath, $dataFilePath, $mockCommands);
     die;
 } elseif ($arg === "reset") {
     unlink($dataFilePath);
     die;
 } elseif ($arg === "update") {
     $showAlerts = $argc > 2 && $argv[2] == "showAlerts";
-    update($dataDirectory, $showAlerts);
+    update($dataDirectory, $showAlerts, $mockCommands);
     die;
 } elseif ($arg === "config") {
     processConfigChange($argv, $configFilePath);
@@ -158,50 +159,69 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
     $data = $parser->getOutput();
     $renderer = new BitBarRenderer($data, $config);
     $text = $renderer->getShareText($mode);
-    $pipe = popen("pbcopy", "w");
-    if ($pipe !== false) {
-        fwrite($pipe, $text);
-        pclose($pipe);
+    if ($mockCommands) {
+        foreach (explode("\n", $text) as $line) {
+            echo "PBCOPY: $line\n";
+        }
+        showAlert("Copied to clipboard:\n\n" . $text, $mockCommands);
+    } else {
+        $pipe = popen("pbcopy", "w");
+        if ($pipe !== false) {
+            fwrite($pipe, $text);
+            pclose($pipe);
+        }
+        showAlert("Copied to clipboard:\n\n" . $text, $mockCommands);
     }
-    showAlert("Copied to clipboard:\n\n" . $text);
     die;
 } elseif ($arg === "export") {
     if (!file_exists($dataFilePath)) {
-        showAlert(Strings::EXPORT_ALERT_NO_DATA);
+        showAlert(Strings::EXPORT_ALERT_NO_DATA, $mockCommands);
         die;
     }
-    $output = @trim(shell_exec("osascript -e 'POSIX path of (choose file name with prompt \"Export Build Times Data\" default name \"buildTimes.csv\")'") ?? "");
+    $output = $argc > 2 ? $argv[2] : null;
+    if ($output === null) {
+        $output = @trim(shell_exec("osascript -e 'POSIX path of (choose file name with prompt \"Export Build Times Data\" default name \"buildTimes.csv\")'") ?? "");
+    }
     if ($output !== "") {
         $copyError = copyFile($dataFilePath, $output);
         if ($copyError === null) {
-            showAlert(Strings::EXPORT_ALERT_SUCCESS);
+            showAlert(Strings::EXPORT_ALERT_SUCCESS, $mockCommands);
         } else {
-            showAlert(sprintf(Strings::EXPORT_ALERT_FAIL, $copyError));
+            showAlert(sprintf(Strings::EXPORT_ALERT_FAIL, $copyError), $mockCommands);
         }
     }
     die;
 } elseif ($arg === "import") {
-    $selectedFile = @trim(shell_exec("osascript -e 'POSIX path of (choose file of type {\"public.comma-separated-values-text\"} with prompt \"Import Build Times Data\")'") ?? "");
+    $selectedFile = $argc > 2 ? $argv[2] : null;
+    if ($selectedFile === null) {
+        $selectedFile = @trim(shell_exec("osascript -e 'POSIX path of (choose file of type {\"public.comma-separated-values-text\"} with prompt \"Import Build Times Data\")'") ?? "");
+    }
     if ($selectedFile === "" || !file_exists($selectedFile)) {
         die;
     }
     if (!BuildTimesFileParser::isValidFile($selectedFile)) {
-        showAlert(Strings::IMPORT_ALERT_INVALID);
+        showAlert(Strings::IMPORT_ALERT_INVALID, $mockCommands);
         die;
     }
-    $confirmed = @trim(shell_exec("osascript -e " . escapeshellarg('display alert "' . escapeAppleScript(Strings::UPDATE_ALERT_TITLE) . '" message "' . escapeAppleScript(Strings::IMPORT_ALERT_CONFIRM) . '" buttons {"Cancel", "OK"} default button "Cancel"')) ?? "");
-    if (strpos($confirmed, "OK") === false) {
-        die;
+    if ($argc <= 2) {
+        $confirmed = @trim(shell_exec("osascript -e " . escapeshellarg('display alert "' . escapeAppleScript(Strings::UPDATE_ALERT_TITLE) . '" message "' . escapeAppleScript(Strings::IMPORT_ALERT_CONFIRM) . '" buttons {"Cancel", "OK"} default button "Cancel"')) ?? "");
+        if (strpos($confirmed, "OK") === false) {
+            die;
+        }
     }
     $copyError = copyFile($selectedFile, $dataFilePath);
     if ($copyError === null) {
-        showAlert(Strings::IMPORT_ALERT_SUCCESS);
+        showAlert(Strings::IMPORT_ALERT_SUCCESS, $mockCommands);
     } else {
-        showAlert(sprintf(Strings::IMPORT_ALERT_FAIL, $copyError));
+        showAlert(sprintf(Strings::IMPORT_ALERT_FAIL, $copyError), $mockCommands);
     }
     die;
 } elseif ($arg === "openDataLocation") {
-    exec("open " . escapeshellarg($dataDirectory));
+    if ($mockCommands) {
+        echo "OPEN: $dataDirectory\n";
+    } else {
+        exec("open " . escapeshellarg($dataDirectory));
+    }
     die;
 } elseif ($arg === "configure") {
     echo "Running `which php`\n";
@@ -1272,10 +1292,10 @@ final class DataRow
  *
  * @param string $startTimeFilePath Path to the start time file
  */
-function markStart($startTimeFilePath)
+function markStart($startTimeFilePath, $mockCommands)
 {
     @file_put_contents($startTimeFilePath, "" . time());
-    refreshSwiftBar();
+    refreshSwiftBar($mockCommands);
 }
 
 /**
@@ -1285,7 +1305,7 @@ function markStart($startTimeFilePath)
  * @param string $startTimeFilePath Path to the start time file
  * @param string $dataFilePath Path to the CSV data file
  */
-function markEnd($type, $startTimeFilePath, $dataFilePath)
+function markEnd($type, $startTimeFilePath, $dataFilePath, $mockCommands)
 {
     $content = @file_get_contents($startTimeFilePath);
     @unlink($startTimeFilePath);
@@ -1343,15 +1363,21 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
     fputcsv($handle, $data, ",", "\"", "");
 
     fclose($handle);
-    refreshSwiftBar();
+    refreshSwiftBar($mockCommands);
 }
 
 /**
  * Refreshes the SwiftBar plugin by calling the SwiftBar URL scheme.
+ *
+ * @param bool $mockCommands If true, prints the URL instead of opening it
  */
-function refreshSwiftBar()
+function refreshSwiftBar($mockCommands)
 {
     $pluginName = basename(__FILE__);
+    if ($mockCommands) {
+        echo "OPEN: swiftbar://refreshplugin?name=$pluginName\n";
+        return;
+    }
     @exec("open " . escapeshellarg("swiftbar://refreshplugin?name=$pluginName") . " > /dev/null 2>&1 &");
 }
 
@@ -1404,8 +1430,9 @@ function getBuildHash()
  *
  * @param string $where Directory to store the temporary update file
  * @param bool $showAlerts Whether to show macOS alert dialogs for status messages
+ * @param bool $mockCommands If true, prints alerts instead of showing them
  */
-function update($where, $showAlerts)
+function update($where, $showAlerts, $mockCommands)
 {
     $options = array(
         'http' => array(
@@ -1423,7 +1450,7 @@ function update($where, $showAlerts)
     if ($data === false) {
         error_log("Unable to download update file from: " . Config::UPDATE_URL);
         if ($showAlerts) {
-            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
+            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE, $mockCommands);
         }
         exit(1);
     }
@@ -1437,7 +1464,7 @@ function update($where, $showAlerts)
             // Show alert message:
             error_log("No update available.");
             if ($showAlerts) {
-                showAlert(Strings::UPDATE_ALERT_NO_UPDATES_MESSAGE);
+                showAlert(Strings::UPDATE_ALERT_NO_UPDATES_MESSAGE, $mockCommands);
             }
             exit(1);
         }
@@ -1453,7 +1480,7 @@ function update($where, $showAlerts)
     if ($result === false) {
         error_log("Unable to write update file to: " . $updateFile);
         if ($showAlerts) {
-            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
+            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE, $mockCommands);
         }
         exit(1);
     }
@@ -1461,7 +1488,7 @@ function update($where, $showAlerts)
     if ($result !== strlen($data)) {
         error_log("Unable to write update file to: " . $updateFile);
         if ($showAlerts) {
-            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
+            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE, $mockCommands);
         }
         exit(1);
     }
@@ -1470,7 +1497,7 @@ function update($where, $showAlerts)
     if ($result === false) {
         error_log("Unable change permission of $updateFile to 0755");
         if ($showAlerts) {
-            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
+            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE, $mockCommands);
         }
         exit(1);
     }
@@ -1479,7 +1506,7 @@ function update($where, $showAlerts)
     if ($result === false) {
         error_log("Unable to rename $updateFile to " . __FILE__);
         if ($showAlerts) {
-            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE);
+            showAlert(Strings::UPDATE_ALERT_FAIL_MESSAGE, $mockCommands);
         }
         exit(1);
     }
@@ -1487,7 +1514,7 @@ function update($where, $showAlerts)
     // Show alert message
     echo "Update successful";
     if ($showAlerts) {
-        showAlert(Strings::UPDATE_ALERT_SUCCESS_MESSAGE);
+        showAlert(Strings::UPDATE_ALERT_SUCCESS_MESSAGE, $mockCommands);
     }
     exit(0);
 }
@@ -1502,8 +1529,14 @@ function escapeAppleScript($string)
     return str_replace(['\\', '"'], ['\\\\', '\\"'], $string);
 }
 
-function showAlert($message)
+function showAlert($message, $mockCommands)
 {
+    if ($mockCommands) {
+        foreach (explode("\n", $message) as $line) {
+            echo "ALERT: $line\n";
+        }
+        return;
+    }
     $title = escapeAppleScript(Strings::UPDATE_ALERT_TITLE);
     $message = escapeAppleScript($message);
     $command = "osascript -e " . escapeshellarg('display alert "' . $title . '" message "' . $message . '"') . " > /dev/null 2>&1 &";

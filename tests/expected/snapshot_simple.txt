@@ -1,0 +1,59 @@
+0s | templateImage=ICON
+---
+Today
+Total, since: 2024-01-15| alternate=true
+Builds: no builds yet
+Builds 6, 2 failed| alternate=true
+Build time: no builds yet
+-- Success: no builds yet
+-- Success: 3m 30s| alternate=true
+-- Fail: no builds yet
+-- Fail: 2m 30s| alternate=true
+Build time: 6m 0s| alternate=true
+-- Success: no builds yet
+-- Success: 3m 30s| alternate=true
+-- Fail: no builds yet
+-- Fail: 2m 30s| alternate=true
+Average build time: no builds yet
+-- Success: no builds yet
+-- Success: 52s| alternate=true
+-- Fail: no builds yet
+-- Fail: 1m 15s| alternate=true
+Average build time: 1m 0s| alternate=true
+-- Success: no builds yet
+-- Success: 52s| alternate=true
+-- Fail: no builds yet
+-- Fail: 1m 15s| alternate=true
+Daily average: 2m 0s, 2 builds
+-- Success: 1m 10s, 1 builds
+-- Fail: 50s, 0 builds
+---
+Last build: success, 15s
+---
+Refresh| refresh=true
+Share| bash='SELF' param1=share param2=today refresh=false terminal=false
+Share| bash='SELF' param1=share param2=total refresh=false terminal=false alternate=true
+Settings
+-- Filter
+---- ✔ Show all| bash='SELF' param1=config param2=filter_toggle param3=all param4="-" param5=set refresh=true terminal=false
+---- MyApp.xcworkspace| bash='SELF' param1=config param2=filter_toggle param3=workspace param4="MyApp.xcworkspace" param5=set refresh=true terminal=false
+---- MyApp.xcworkspace| bash='SELF' param1=config param2=filter_toggle param3=workspace param4="MyApp.xcworkspace" param5=add refresh=true terminal=false alternate=true
+---- OtherApp.xcworkspace| bash='SELF' param1=config param2=filter_toggle param3=workspace param4="OtherApp.xcworkspace" param5=set refresh=true terminal=false
+---- OtherApp.xcworkspace| bash='SELF' param1=config param2=filter_toggle param3=workspace param4="OtherApp.xcworkspace" param5=add refresh=true terminal=false alternate=true
+---- MyApp.xcodeproj| bash='SELF' param1=config param2=filter_toggle param3=project param4="MyApp.xcodeproj" param5=set refresh=true terminal=false
+---- MyApp.xcodeproj| bash='SELF' param1=config param2=filter_toggle param3=project param4="MyApp.xcodeproj" param5=add refresh=true terminal=false alternate=true
+---- OtherApp.xcodeproj| bash='SELF' param1=config param2=filter_toggle param3=project param4="OtherApp.xcodeproj" param5=set refresh=true terminal=false
+---- OtherApp.xcodeproj| bash='SELF' param1=config param2=filter_toggle param3=project param4="OtherApp.xcodeproj" param5=add refresh=true terminal=false alternate=true
+-- Data
+---- Export| bash='SELF' param1=export refresh=false terminal=false
+---- Import| bash='SELF' param1=import refresh=true terminal=false
+---- Open Data Location| bash='SELF' param1=openDataLocation refresh=false terminal=false
+-- Reset
+---- Really?
+------ Yes| bash='SELF' param1=reset refresh=true terminal=false
+About
+-- Source Code & Info| href=https://github.com/matopeto/xcode-build-times
+-- Icon by Icons8| href=https://icons8.com
+-- Update
+---- Really?
+------ Yes| bash='SELF' param1=update param2=showAlerts refresh=true terminal=false
