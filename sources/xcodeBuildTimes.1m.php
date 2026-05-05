@@ -800,7 +800,8 @@ final class BitBarRenderer
         if (count($this->data->warnings) > 0) {
             $row .= " ⚠️";
         }
-        $row .= " | sfimage=hammer width=18 height=18";
+        $hammerIcon = count($this->data->inProgress) > 0 ? "hammer.fill" : "hammer";
+        $row .= " | sfimage=$hammerIcon width=18 height=18";
 
         $this->renderRows([$row, "---"]);
     }
