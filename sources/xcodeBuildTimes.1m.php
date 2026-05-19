@@ -1348,7 +1348,7 @@ function markEnd($type, $startTimeFilePath, $dataFilePath)
 function refreshSwiftBar()
 {
     $pluginName = basename(__FILE__);
-    @exec("open " . escapeshellarg("swiftbar://refreshplugin?name=$pluginName") . " > /dev/null 2>&1 &");
+    @exec("open -g " . escapeshellarg("swiftbar://refreshplugin?name=$pluginName") . " > /dev/null 2>&1 &");
 }
 
 /**
