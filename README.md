@@ -11,7 +11,7 @@ Have you ever wondered how much time a day you spend waiting for Xcode to do you
 - **Always in sight** - your build time sits right in the menu bar, no need to open anything
 - **Know where your time goes** - daily totals, averages, and all-time stats at a glance (hold `⌥ Option` to reveal the full horror)
 - **Spot the failures** - separate success and fail breakdowns so you know what's costing you
-- **Filter what matters** - track only the workspaces or projects you care about
+- **Filter what matters** - track only the workspaces, projects, or machines you care about
 - **Share the pain** - show your teammates just how long you've been waiting
 - **Your data, your way** - import, export, or back up your build history anytime
 - **Always up to date** - one-click updates directly from the menu bar
