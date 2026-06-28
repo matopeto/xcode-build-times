@@ -42,6 +42,10 @@ final class Strings
     const WARNING_OLD_SWIFTBAR_VERSION = "Please use the latest SwiftBar for proper functionality";
     const ROW_WARNING = "⚠️ %s"; // %s will be replaced by warning message
 
+    const ROW_MIGRATION_NOTICE = "New data format — action needed"; // rendered via ROW_WARNING
+    const ROW_MIGRATION_FILL = "Mark all older builds as built on this Mac"; // confirm dialog names the exact Mac
+    const ROW_MIGRATION_IGNORE = "Keep older builds without a Mac (won't show under this Mac)";
+
     const ROW_HEADER_TODAY = "Today";
     const ROW_HEADER_TODAY_FILTER = "Today (%s)"; // %s will be replaced with selected workspaces and projects
     const ROW_HEADER_TOTAL = "Total";
@@ -86,9 +90,15 @@ final class Strings
     const ROW_SETTINGS_DATA_EXPORT = "Export";
     const ROW_SETTINGS_DATA_IMPORT = "Import";
     const ROW_SETTINGS_DATA_OPEN_LOCATION = "Open Data Location";
+    const ROW_SETTINGS_DATA_FILL_MACHINE = "Assign builds without a machine to this Mac";
     const ROW_SETTINGS_RESET = "Reset";
     const ROW_SETTINGS_RESET_REALLY = "Really?";
     const ROW_SETTINGS_RESET_REALLY_YES = "Yes";
+
+    const MIGRATION_FILL_CONFIRM = "Mark all builds that aren't linked to a Mac as built on this Mac:\n\n%s\n\nThis can't be undone."; // %s will be replaced with this Mac's spec
+    const MIGRATION_FILL_SUCCESS = "Assigned %d builds to this Mac."; // %d will be replaced with the number of builds updated
+    const MIGRATION_FILL_NO_MACHINE = "Couldn't detect this Mac. Please try again.";
+    const MIGRATION_FAIL = "Couldn't update the data file.";
 
     const IMPORT_ALERT_CONFIRM = "This will replace all existing build data. Continue?";
     const IMPORT_ALERT_SUCCESS = "Data imported successfully.";
@@ -113,6 +123,20 @@ final class Strings
     const UPDATE_ALERT_NO_UPDATES_MESSAGE = "No updates available.";
 }
 
+final class Columns
+{
+    const DATE = 0;
+    const DURATION = 1;
+    const TYPE = 2;
+    const WORKSPACE = 3;
+    const PROJECT = 4;
+    const XCODE_VERSION = 5;
+    const XCODE_BUILD = 6;
+    const MACHINE_ID = 7;
+    const MACHINE_SPEC = 8;
+    const COUNT = 9; // total number of columns, not an index
+}
+
 $buildHash = getBuildHash();
 
 $scriptDirectory = realpath(__DIR__);
@@ -120,7 +144,6 @@ $dataDirectory = $scriptDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_DIR;
 $dataFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::DATA_FILE_NAME;
 $configFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::CONFIG_FILE_NAME;
 $machineFilePath = $dataDirectory . DIRECTORY_SEPARATOR . Config::MACHINE_FILE_NAME;
-$machine = new Machine($machineFilePath);
 $startTimeFilePathWithoutHash = $dataDirectory . DIRECTORY_SEPARATOR . Config::START_TIME_FILE_NAME;
 $startTimeFilesPattern = $startTimeFilePathWithoutHash . "\.*";
 $startTimeFilePath = $startTimeFilePathWithoutHash . "." . $buildHash;
@@ -131,6 +154,8 @@ if (!file_exists($dataDirectory)) {
         exit(1);
     }
 }
+
+$machine = new Machine($machineFilePath);
 
 $idAlertMessage = getenv("IDEAlertMessage");
 $arg = $argc > 1 ? $argv[1] : null;
@@ -154,11 +179,32 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
 } elseif ($arg === "config") {
     processConfigChange($argv, $configFilePath, $machine);
     die;
+} elseif ($arg === "migrateMachine") {
+    $mode = $argc > 2 ? $argv[2] : "";
+    $parser = new BuildTimesFileParser($dataFilePath);
+    if ($mode === "fill") {
+        list($machineId, $machineSpec) = $machine->forBuild();
+        if ($machineId === "" || $machineSpec === "") {
+            showAlert(Strings::MIGRATION_FILL_NO_MACHINE);
+        } else {
+            $confirmMessage = sprintf(Strings::MIGRATION_FILL_CONFIRM, $machineSpec);
+            $confirmed = @trim(shell_exec("osascript -e " . escapeshellarg('display alert "' . escapeAppleScript(Strings::UPDATE_ALERT_TITLE) . '" message "' . escapeAppleScript($confirmMessage) . '" buttons {"Cancel", "OK"} default button "Cancel"')) ?? "");
+            if (strpos($confirmed, "OK") !== false) {
+                $count = $parser->fillEmptyMachineOrSpec($machineId, $machineSpec);
+                showAlert($count === false ? Strings::MIGRATION_FAIL : sprintf(Strings::MIGRATION_FILL_SUCCESS, $count));
+            }
+        }
+    } elseif ($mode === "ignore") {
+        if ($parser->keepBuildsWithoutMachine() === false) {
+            showAlert(Strings::MIGRATION_FAIL);
+        }
+    }
+    die;
 } elseif ($arg === "share") {
     $mode = $argc > 2 ? $argv[2] : "today";
     $config = new BuildTimesConfig($configFilePath, $machine);
-    $parser = new BuildTimesFileParser($dataFilePath, $startTimeFilesPattern, $config);
-    $data = $parser->getOutput();
+    $parser = new BuildTimesFileParser($dataFilePath);
+    $data = $parser->getOutput($config, $startTimeFilesPattern);
     $renderer = new BitBarRenderer($data, $config);
     $text = $renderer->getShareText($mode);
     $pipe = popen("pbcopy", "w");
@@ -233,8 +279,8 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
 }
 
 $config = new BuildTimesConfig($configFilePath, $machine);
-$parser = new BuildTimesFileParser($dataFilePath, $startTimeFilesPattern, $config);
-$data = $parser->getOutput();
+$parser = new BuildTimesFileParser($dataFilePath);
+$data = $parser->getOutput($config, $startTimeFilesPattern);
 $renderer = new BitBarRenderer($data, $config);
 $renderer->render();
 
@@ -243,34 +289,22 @@ final class BuildTimesFileParser
     /** @var string */
     private $dataFile;
 
-    /** @var string */
-    private $startTimeFilesPattern;
-
-    /** @var BuildTimesConfig */
-    private $config;
-
-    /** @var DateTimeZone */
-    private $localTimeZone;
-
     /**
      * BuildTimesFileParser constructor.
      * @param string $dataFile
-     * @param string $startTimeFilesPattern
-     * @param BuildTimesConfig $config
      */
-    public function __construct($dataFile, $startTimeFilesPattern, $config)
+    public function __construct($dataFile)
     {
         $this->dataFile = $dataFile;
-        $this->startTimeFilesPattern = $startTimeFilesPattern;
-        $this->config = $config;
-        $this->localTimeZone = $config->localTimeZone;
     }
 
     /**
      * Returns output data parsed from file
+     * @param BuildTimesConfig $config
+     * @param string $startTimeFilesPattern
      * @return BuildTimesOutput
      */
-    public function getOutput()
+    public function getOutput($config, $startTimeFilesPattern)
     {
         $result = new BuildTimesOutput();
 
@@ -279,28 +313,28 @@ final class BuildTimesFileParser
             $result->warnings[] = Strings::WARNING_OLD_SWIFTBAR_VERSION . "| href=" . Config::SWIFTBAR_URL;
         }
 
-        // Read CSV
-        $handle = @fopen($this->dataFile, "r");
+        /**
+         * @var DataRow[][] $rows
+         * @var null|boolean $status null when the file can't be read, otherwise true if some rows are invalid
+         * @var string[] $workspaces
+         * @var string[] $projects
+         * @var string[] $machines
+         * @var boolean $hasBuildsWithoutMachine
+         */
+        list($rows, $status, $workspaces, $projects, $machines, $hasBuildsWithoutMachine) = $this->parseFile($config);
 
-        if ($handle === FALSE) {
+        if ($status === null) {
             $result->warnings[] = Strings::WARNING_UNABLE_TO_READ_DATA_FILE;
         } else {
-            /**
-             * @var DataRow[][] $rows
-             * @var boolean $problemWithData
-             * @var string[] $workspaces
-             * @var string[] $projects
-             * @var string[] $machines
-             */
-            list($rows, $problemWithData, $workspaces, $projects, $machines) = $this->parseFile($handle, $this->config);
-            if ($problemWithData) {
+            if ($status === true) {
                 $result->warnings[] = Strings::WARNING_PROBLEM_WITH_DATA_FILE;
             }
+            $result->hasBuildsWithoutMachine = $hasBuildsWithoutMachine;
 
             $workspaces = array_unique(
                 array_filter(
                     array_merge(
-                        $this->config->selectedWorkspaces,
+                        $config->selectedWorkspaces,
                         $workspaces
                     ),
                     function ($item) {
@@ -314,7 +348,7 @@ final class BuildTimesFileParser
             $projects = array_unique(
                 array_filter(
                     array_merge(
-                        $this->config->selectedProjects,
+                        $config->selectedProjects,
                         $projects
                     ),
                     function ($item) {
@@ -327,7 +361,7 @@ final class BuildTimesFileParser
 
             // A selected machine may have no rows in the data (e.g. after import); keep it listed
             // so it can be unchecked, labelled by its id. "@current"/"" are sentinels, not machines.
-            foreach ($this->config->selectedMachines as $machineId) {
+            foreach ($config->selectedMachines as $machineId) {
                 if ($machineId !== "@current" && $machineId !== "" && !isset($machines[$machineId])) {
                     $machines[$machineId] = $machineId;
                 }
@@ -363,7 +397,7 @@ final class BuildTimesFileParser
             /** @var string|null $todayKey */
             $todayKey = null;
             try {
-                $todayKey = (new DateTime("now", $this->localTimeZone))->format("Y-m-d");
+                $todayKey = (new DateTime("now", $config->localTimeZone))->format("Y-m-d");
             } catch (Exception $ex) {
             }
 
@@ -413,14 +447,14 @@ final class BuildTimesFileParser
             }
         }
 
-        $result->selectedWorkspaces = $this->config->selectedWorkspaces;
-        $result->selectedProjects = $this->config->selectedProjects;
-        $result->selectedMachines = $this->config->selectedMachines;
-        $result->currentMachineId = $this->config->currentMachineId;
-        $result->currentMachineSpec = $this->config->currentMachineSpec;
+        $result->selectedWorkspaces = $config->selectedWorkspaces;
+        $result->selectedProjects = $config->selectedProjects;
+        $result->selectedMachines = $config->selectedMachines;
+        $result->currentMachineId = $config->currentMachineId;
+        $result->currentMachineSpec = $config->currentMachineSpec;
 
         // Determine if some builds are in progress
-        $files = glob($this->startTimeFilesPattern);
+        $files = glob($startTimeFilesPattern);
         foreach ($files as $file) {
             $duration = $this->getProgressDuration($file);
             if ($duration > 0 && $duration < 86400) { // We skip very long durations, probably old not removed start files.
@@ -469,25 +503,25 @@ final class BuildTimesFileParser
      */
     private static function parseRow($row)
     {
-        if (count($row) < 3) {
+        if (count($row) <= Columns::TYPE) {
             return false;
         }
-        if (!preg_match('~[0-9]+~', $row[1])) {
+        if (!preg_match('~[0-9]+~', $row[Columns::DURATION])) {
             return false;
         }
-        if (!preg_match('~fail|success~', $row[2])) {
+        if (!preg_match('~fail|success~', $row[Columns::TYPE])) {
             return false;
         }
-        if (preg_match('~[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}~', $row[0])) {
+        if (preg_match('~[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}~', $row[Columns::DATE])) {
             // Old format (without time zone)
-            $date = DateTime::createFromFormat("Y-m-d H:i:s", $row[0]);
+            $date = DateTime::createFromFormat("Y-m-d H:i:s", $row[Columns::DATE]);
             if ($date == false) {
                 return false;
             }
         } else {
             // New format (with time zone)
             try {
-                $date = new DateTime($row[0]);
+                $date = new DateTime($row[Columns::DATE]);
             } catch (Exception $e) {
                 return false;
             }
@@ -495,40 +529,41 @@ final class BuildTimesFileParser
 
         $dataRow = new DataRow();
         $dataRow->date = $date;
-        $dataRow->count = intval($row[1]);
-        $dataRow->type = $row[2];
-        if (count($row) >= 5) {
-            $dataRow->workspace = $row[3];
-            $dataRow->project = $row[4];
+        $dataRow->count = intval($row[Columns::DURATION]);
+        $dataRow->type = $row[Columns::TYPE];
+        if (count($row) > Columns::PROJECT) {
+            $dataRow->workspace = $row[Columns::WORKSPACE];
+            $dataRow->project = $row[Columns::PROJECT];
         }
-        // Machine columns are optional, so older files without them stay valid.
-        if (count($row) >= 9) {
-            $dataRow->machineId = $row[7];
-            $dataRow->machineSpec = $row[8];
+        // Machine columns are optional; read whichever are present (a row may carry the id but not the spec).
+        if (count($row) > Columns::MACHINE_ID) {
+            $dataRow->machineId = $row[Columns::MACHINE_ID];
+        }
+        if (count($row) > Columns::MACHINE_SPEC) {
+            $dataRow->machineSpec = $row[Columns::MACHINE_SPEC];
         }
         return $dataRow;
     }
 
     /**
-     * @param resource $handle
+     * Reads the data file and groups the selected rows by day, collecting the available
+     * workspaces, projects and machines along the way.
      *
      * @param BuildTimesConfig $config
-     * @return array - array with two values, first is [DataRow], second is boolean
+     * @return array - [rows, status, workspaces, projects, machines, hasBuildsWithoutMachine], where status is
+     *                 null when the file can't be read, otherwise true if some rows are invalid
      */
-    private function parseFile($handle, $config)
+    private function parseFile($config)
     {
         $workspaces = [];
         $projects = [];
         $machines = [];
         $rows = [];
-        $problemWithData = false;
-        while (($row = fgetcsv($handle, 1000, ",", "\"", "")) !== FALSE) {
-            $dataRow = self::parseRow($row);
-            if ($dataRow === false) {
-                $problemWithData = true;
-                continue;
-            }
+        $hasBuildsWithoutMachine = false;
+        $localTimeZone = $config->localTimeZone;
 
+        $dataRows = $this->readRows();
+        foreach ($dataRows as $dataRow) {
             if ($dataRow->workspace !== null) {
                 $workspaces[$dataRow->workspace] = true;
             }
@@ -541,11 +576,14 @@ final class BuildTimesFileParser
                     : $dataRow->machineId;
             } else {
                 $machines[""] = "";
+                if ($dataRow->machineId === null) {
+                    $hasBuildsWithoutMachine = true;
+                }
             }
 
             $keyDate = clone $dataRow->date;
-            if ($this->localTimeZone !== null) {
-                $keyDate->setTimezone($this->localTimeZone);
+            if ($localTimeZone !== null) {
+                $keyDate->setTimezone($localTimeZone);
             }
             $key = $keyDate->format("Y-m-d");
 
@@ -554,12 +592,164 @@ final class BuildTimesFileParser
             }
         }
 
+        return [$rows, $dataRows->getReturn(), array_keys($workspaces), array_keys($projects), $machines, $hasBuildsWithoutMachine];
+    }
+
+    /**
+     * Streams the parsed rows of the data file one at a time. Invalid rows are skipped; the
+     * generator's return value is null when the file can't be read, otherwise true if some
+     * rows were invalid.
+     *
+     * @return Generator
+     */
+    private function readRows()
+    {
+        $handle = @fopen($this->dataFile, "r");
+        if ($handle === false) {
+            return null;
+        }
+
+        $problem = false;
+        while (($row = fgetcsv($handle, 1000, ",", "\"", "")) !== false) {
+            $dataRow = self::parseRow($row);
+            if ($dataRow === false) {
+                $problem = true;
+                continue;
+            }
+            yield $dataRow;
+        }
         fclose($handle);
 
-        $workspaces = array_keys($workspaces);
-        $projects = array_keys($projects);
+        return $problem;
+    }
 
-        return [$rows, $problemWithData, $workspaces, $projects, $machines];
+    /**
+     * Appends a build row to the data file.
+     *
+     * @param string[] $row CSV row to append
+     */
+    public function appendBuild($row)
+    {
+        $handle = @fopen($this->dataFile, "a");
+        if ($handle === false) {
+            error_log("Unable to open file: $this->dataFile");
+            exit(1);
+        }
+
+        fputcsv($handle, $row, ",", "\"", "");
+        fclose($handle);
+    }
+
+    /**
+     * Attributes machine-less rows to the given machine, and completes that machine's own missing
+     * spec; rows of other machines and already complete rows are left untouched. Returns the number
+     * of rows changed.
+     *
+     * @param string $machineId
+     * @param string $machineSpec
+     * @return int|false Number of rows changed, or false if the rewrite failed
+     */
+    public function fillEmptyMachineOrSpec($machineId, $machineSpec)
+    {
+        $changed = 0;
+        $ok = $this->rewrite(function ($row) use ($machineId, $machineSpec, &$changed) {
+            $dataRow = self::parseRow($row);
+            if ($dataRow === false) {
+                return $row;
+            }
+            // Assign only rows with no id (an existing id is never overwritten); also fill this Mac's own missing spec.
+            $rowId = $dataRow->machineId;
+            $missingOwnSpec = $rowId === $machineId && ($dataRow->machineSpec === null || $dataRow->machineSpec === "");
+            if ($rowId === null || $rowId === "" || $missingOwnSpec) {
+                $changed++;
+                return $this->withMachine($row, $machineId, $machineSpec);
+            }
+            return $row;
+        });
+        return $ok ? $changed : false;
+    }
+
+    /**
+     * Upgrades rows missing the machine columns to the new format by padding them with empty
+     * machine columns; existing values, including any present id, are preserved.
+     *
+     * @return int|false Number of rows changed, or false if the rewrite failed
+     */
+    public function keepBuildsWithoutMachine()
+    {
+        $changed = 0;
+        $ok = $this->rewrite(function ($row) use (&$changed) {
+            if (self::parseRow($row) !== false && count($row) < Columns::COUNT) {
+                $changed++;
+                return array_pad($row, Columns::COUNT, "");
+            }
+            return $row;
+        });
+        return $ok ? $changed : false;
+    }
+
+    /**
+     * Rewrites the data file row by row through $transform, atomically (temp file + rename).
+     * Leaves the original untouched and returns false on any read/write failure, and skips the
+     * rename entirely when no row actually changed.
+     *
+     * @param callable $transform Maps a CSV row to its replacement row
+     * @return bool Whether the data file is intact (rewritten, or left unchanged)
+     */
+    private function rewrite($transform)
+    {
+        $in = @fopen($this->dataFile, "r");
+        if ($in === false) {
+            return false;
+        }
+        $tmp = $this->dataFile . ".tmp";
+        $out = @fopen($tmp, "w");
+        if ($out === false) {
+            fclose($in);
+            return false;
+        }
+
+        $ok = true;
+        $changed = false;
+        while (($row = fgetcsv($in, 1000, ",", "\"", "")) !== false) {
+            $new = $transform($row);
+            if ($new !== $row) {
+                $changed = true;
+            }
+            if (fputcsv($out, $new, ",", "\"", "") === false) {
+                $ok = false;
+                break;
+            }
+        }
+
+        fclose($in);
+        // fclose flushes buffered writes; a failure here means the temp file is incomplete.
+        if (fclose($out) === false) {
+            $ok = false;
+        }
+
+        if (!$ok || !$changed) {
+            @unlink($tmp);
+            return $ok;
+        }
+
+        return @rename($tmp, $this->dataFile);
+    }
+
+    /**
+     * Returns the row padded to the full column width with the machine columns set.
+     *
+     * @param string[] $row
+     * @param string $machineId
+     * @param string $machineSpec
+     * @return string[]
+     */
+    private function withMachine($row, $machineId, $machineSpec)
+    {
+        $row = array_pad($row, Columns::MACHINE_ID, "");
+        $row[Columns::MACHINE_ID] = $machineId;
+        $row[Columns::MACHINE_SPEC] = $machineSpec;
+        return $row;
     }
 
     /**
@@ -942,6 +1132,14 @@ final class BitBarRenderer
             $rows[] = "---";
         }
 
+        // One-time notice to assign builds recorded before the machine columns existed.
+        if ($this->data->hasBuildsWithoutMachine) {
+            $rows[] = sprintf(Strings::ROW_WARNING, Strings::ROW_MIGRATION_NOTICE);
+            $rows[] = "-- " . Strings::ROW_MIGRATION_FILL . "| bash='" . __FILE__ . "' param1=migrateMachine param2=fill refresh=true terminal=false";
+            $rows[] = "-- " . Strings::ROW_MIGRATION_IGNORE . "| bash='" . __FILE__ . "' param1=migrateMachine param2=ignore refresh=true terminal=false";
+            $rows[] = "---";
+        }
+
         // Today and on alt total info
         $todayData = $this->data->todayData;
         $totalData = $this->data->totalData;
@@ -1110,6 +1308,7 @@ final class BitBarRenderer
         $rows[] = "---- " . Strings::ROW_SETTINGS_DATA_EXPORT . "| bash='" . __FILE__ . "' param1=export refresh=false terminal=false";
         $rows[] = "---- " . Strings::ROW_SETTINGS_DATA_IMPORT . "| bash='" . __FILE__ . "' param1=import refresh=true terminal=false";
         $rows[] = "---- " . Strings::ROW_SETTINGS_DATA_OPEN_LOCATION . "| bash='" . __FILE__ . "' param1=openDataLocation refresh=false terminal=false";
+        $rows[] = "---- " . Strings::ROW_SETTINGS_DATA_FILL_MACHINE . "| bash='" . __FILE__ . "' param1=migrateMachine param2=fill refresh=true terminal=false";
         $rows[] = "-- " . Strings::ROW_SETTINGS_RESET;
         $rows[] = "---- " . Strings::ROW_SETTINGS_RESET_REALLY;
         $rows[] = "------ " . Strings::ROW_SETTINGS_RESET_REALLY_YES . "| bash='" . __FILE__ . "' param1=reset refresh=true terminal=false";
@@ -1374,6 +1573,8 @@ final class BuildTimesOutput
     var $projects = [];
     /** @var string[] - machine id => spec; the "" key marks rows with no machine id (labelled at render time) */
     var $machines = [];
+    /** @var bool - true if some rows predate the machine columns (old format) */
+    var $hasBuildsWithoutMachine = false;
     /** @var string[] - empty means all */
     var $selectedWorkspaces = [];
     /** @var string[] - empty means all */
@@ -1678,27 +1879,18 @@ function markEnd($type, $startTimeFilePath, $dataFilePath, $machine)
 
     list($machineId, $machineSpec) = $machine->forBuild();
 
-    $data = [
-        (new DateTime())->format("c"),
-        $duration,
-        $type,
-        $workspace,
-        $project,
-        $xcodeVersion,
-        $xcodeBuild,
-        $machineId,
-        $machineSpec
-    ];
+    $data = [];
+    $data[Columns::DATE] = (new DateTime())->format("c");
+    $data[Columns::DURATION] = $duration;
+    $data[Columns::TYPE] = $type;
+    $data[Columns::WORKSPACE] = $workspace;
+    $data[Columns::PROJECT] = $project;
+    $data[Columns::XCODE_VERSION] = $xcodeVersion;
+    $data[Columns::XCODE_BUILD] = $xcodeBuild;
+    $data[Columns::MACHINE_ID] = $machineId;
+    $data[Columns::MACHINE_SPEC] = $machineSpec;
 
-    $handle = @fopen($dataFilePath, "a");
-    if ($handle === false) {
-        error_log("Unable to open file: $dataFilePath");
-        exit(1);
-    }
-
-    fputcsv($handle, $data, ",", "\"", "");
-
-    fclose($handle);
+    (new BuildTimesFileParser($dataFilePath))->appendBuild($data);
     refreshSwiftBar();
 }
 
