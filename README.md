@@ -76,6 +76,13 @@ The script is called `xcodeBuildTimes.1m.php`, so xbar/SwiftBar will refresh the
 
 You can find [more info about the refresh intervals in the xbar/SwiftBar documentation](https://github.com/matryer/xbar#configure-the-refresh-time).
 
+## Maybe someday (no promises)
+
+A few things I might add — or might not:
+
+- **Merge on import** — pull in another Mac's build history instead of replacing your own.
+- **More filters** — filter by Xcode version, build, or success/fail, not just workspace, project, and machine.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
