@@ -78,6 +78,7 @@ final class Strings
     const SHARE_HEADER_TOTAL = 'Xcode Build Times - Total';
     const SHARE_HEADER_TOTAL_FILTER = 'Xcode Build Times - Total (%s)'; // %s - filter
     const SHARE_FOOTER = 'Tracked with Xcode Build Times - %s'; // %s - ABOUT_URL
+    const SHARE_COPIED_SUCCESS = "Copied to clipboard:\n\n%s"; // %s - shared text
 
     const ROW_SETTINGS = "Settings";
     const ROW_SETTINGS_FILTER = "Filter";
@@ -110,9 +111,11 @@ final class Strings
     const IMPORT_MERGE_SUCCESS = 'Imported %1$d builds; skipped %2$d duplicates already in your history.'; // %1$d - added, %2$d - skipped
     const IMPORT_ALERT_FAIL = "Unable to import data.\n\n%s"; // %s will be replaced with error message
     const IMPORT_ALERT_INVALID = "Selected file is not a valid build times CSV.";
+    const IMPORT_DIALOG_PROMPT = "Import Build Times Data";
     const EXPORT_ALERT_SUCCESS = "Data exported successfully.";
     const EXPORT_ALERT_FAIL = "Unable to export data.\n\n%s"; // %s will be replaced with error message
     const EXPORT_ALERT_NO_DATA = "No data file to export.";
+    const EXPORT_DIALOG_PROMPT = "Export Build Times Data";
 
 
     const ROW_ABOUT = "About";
@@ -218,14 +221,15 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
         fwrite($pipe, $text);
         pclose($pipe);
     }
-    showAlert("Copied to clipboard:\n\n" . $text);
+    showAlert(sprintf(Strings::SHARE_COPIED_SUCCESS, $text));
     die;
 } elseif ($arg === "export") {
     if (!file_exists($dataFilePath)) {
         showAlert(Strings::EXPORT_ALERT_NO_DATA);
         die;
     }
-    $output = @trim(shell_exec("osascript -e 'POSIX path of (choose file name with prompt \"Export Build Times Data\" default name \"buildTimes.csv\")'") ?? "");
+    $script = 'POSIX path of (choose file name with prompt "' . escapeAppleScript(Strings::EXPORT_DIALOG_PROMPT) . '" default name "buildTimes.csv")';
+    $output = @trim(shell_exec("osascript -e " . escapeshellarg($script)) ?? "");
     if ($output !== "") {
         $copyError = copyFile($dataFilePath, $output);
         if ($copyError === null) {
@@ -236,7 +240,8 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
     }
     die;
 } elseif ($arg === "import") {
-    $selectedFile = @trim(shell_exec("osascript -e 'POSIX path of (choose file of type {\"public.comma-separated-values-text\"} with prompt \"Import Build Times Data\")'") ?? "");
+    $script = 'POSIX path of (choose file of type {"public.comma-separated-values-text"} with prompt "' . escapeAppleScript(Strings::IMPORT_DIALOG_PROMPT) . '")';
+    $selectedFile = @trim(shell_exec("osascript -e " . escapeshellarg($script)) ?? "");
     if ($selectedFile === "" || !file_exists($selectedFile)) {
         die;
     }
