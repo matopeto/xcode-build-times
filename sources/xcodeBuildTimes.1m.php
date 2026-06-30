@@ -100,8 +100,14 @@ final class Strings
     const MIGRATION_FILL_NO_MACHINE = "Couldn't detect this Mac. Please try again.";
     const MIGRATION_FAIL = "Couldn't update the data file.";
 
-    const IMPORT_ALERT_CONFIRM = "This will replace all existing build data. Continue?";
+    const BUTTON_CANCEL = "Cancel";
+    const BUTTON_OK = "OK";
+    const BUTTON_MERGE = "Merge";
+    const BUTTON_REPLACE = "Replace";
+
+    const IMPORT_ALERT_CONFIRM = "Merge adds the imported builds to your current history; Replace overwrites it. Either way, your current data is backed up first.";
     const IMPORT_ALERT_SUCCESS = "Data imported successfully.";
+    const IMPORT_MERGE_SUCCESS = 'Imported %1$d builds; skipped %2$d duplicates already in your history.'; // %1$d - added, %2$d - skipped
     const IMPORT_ALERT_FAIL = "Unable to import data.\n\n%s"; // %s will be replaced with error message
     const IMPORT_ALERT_INVALID = "Selected file is not a valid build times CSV.";
     const EXPORT_ALERT_SUCCESS = "Data exported successfully.";
@@ -188,8 +194,8 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
             showAlert(Strings::MIGRATION_FILL_NO_MACHINE);
         } else {
             $confirmMessage = sprintf(Strings::MIGRATION_FILL_CONFIRM, $machineSpec);
-            $confirmed = @trim(shell_exec("osascript -e " . escapeshellarg('display alert "' . escapeAppleScript(Strings::UPDATE_ALERT_TITLE) . '" message "' . escapeAppleScript($confirmMessage) . '" buttons {"Cancel", "OK"} default button "Cancel"')) ?? "");
-            if (strpos($confirmed, "OK") !== false) {
+            $confirmed = confirmDialog($confirmMessage, [Strings::BUTTON_CANCEL, Strings::BUTTON_OK], Strings::BUTTON_CANCEL);
+            if ($confirmed === Strings::BUTTON_OK) {
                 $count = $parser->fillEmptyMachineOrSpec($machineId, $machineSpec);
                 showAlert($count === false ? Strings::MIGRATION_FAIL : sprintf(Strings::MIGRATION_FILL_SUCCESS, $count));
             }
@@ -238,16 +244,26 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
         showAlert(Strings::IMPORT_ALERT_INVALID);
         die;
     }
-    $confirmed = @trim(shell_exec("osascript -e " . escapeshellarg('display alert "' . escapeAppleScript(Strings::UPDATE_ALERT_TITLE) . '" message "' . escapeAppleScript(Strings::IMPORT_ALERT_CONFIRM) . '" buttons {"Cancel", "OK"} default button "Cancel"')) ?? "");
-    if (strpos($confirmed, "OK") === false) {
+    $choice = confirmDialog(Strings::IMPORT_ALERT_CONFIRM, [Strings::BUTTON_CANCEL, Strings::BUTTON_REPLACE, Strings::BUTTON_MERGE], Strings::BUTTON_MERGE);
+    if ($choice !== Strings::BUTTON_MERGE && $choice !== Strings::BUTTON_REPLACE) {
         die;
     }
-    $copyError = copyFile($selectedFile, $dataFilePath);
-    if ($copyError === null) {
-        showAlert(Strings::IMPORT_ALERT_SUCCESS);
+    $merge = $choice === Strings::BUTTON_MERGE;
+
+    backupDataFile($dataFilePath); // safety net before mutating, kept alongside the data
+
+    if ($merge) {
+        $stats = (new BuildTimesFileParser($dataFilePath))->mergeFrom($selectedFile);
+        $message = $stats === false
+            ? trim(sprintf(Strings::IMPORT_ALERT_FAIL, ""))
+            : sprintf(Strings::IMPORT_MERGE_SUCCESS, $stats["imported"], $stats["duplicates"]);
     } else {
-        showAlert(sprintf(Strings::IMPORT_ALERT_FAIL, $copyError));
+        $reason = copyFile($selectedFile, $dataFilePath);
+        $message = $reason !== null
+            ? trim(sprintf(Strings::IMPORT_ALERT_FAIL, $reason))
+            : Strings::IMPORT_ALERT_SUCCESS;
     }
+    showAlert($message);
     die;
 } elseif ($arg === "openDataLocation") {
     exec("open " . escapeshellarg($dataDirectory));
@@ -723,17 +739,7 @@ final class BuildTimesFileParser
         }
 
         fclose($in);
-        // fclose flushes buffered writes; a failure here means the temp file is incomplete.
-        if (fclose($out) === false) {
-            $ok = false;
-        }
-
-        if (!$ok || !$changed) {
-            @unlink($tmp);
-            return $ok;
-        }
-
-        return @rename($tmp, $this->dataFile);
+        return $this->commitTemp($out, $tmp, $ok, $changed);
     }
 
     /**
@@ -750,6 +756,120 @@ final class BuildTimesFileParser
         $row[Columns::MACHINE_ID] = $machineId;
         $row[Columns::MACHINE_SPEC] = $machineSpec;
         return $row;
+    }
+
+    /**
+     * Merges another build-times CSV into this one: combines both files, drops rows that are exact
+     * duplicates (every field identical), and rewrites the data file sorted by date. Rows differing
+     * in any field — a different machine id, or one having a machine and the other not — are all kept.
+     *
+     * @param string $otherFile Path to the CSV to merge in
+     * @return array|false ["imported" => int, "duplicates" => int] on success, false on write failure
+     */
+    public function mergeFrom($otherFile)
+    {
+        // Dedup on the whole row (keyed by the parsed fields, so quoting differences don't matter).
+        $unique = [];
+        foreach ($this->readValidRows($this->dataFile) as $entry) {
+            $unique[implode("\0", $entry["row"])] = $entry;
+        }
+
+        // Add the imported rows, counting how many are new vs. already in our history.
+        $imported = 0;
+        $duplicates = 0;
+        foreach ($this->readValidRows($otherFile) as $entry) {
+            $key = implode("\0", $entry["row"]);
+            if (isset($unique[$key])) {
+                $duplicates++;
+            } else {
+                $unique[$key] = $entry;
+                $imported++;
+            }
+        }
+
+        $merged = array_values($unique);
+        usort($merged, function ($a, $b) {
+            return $a["date"] <=> $b["date"];
+        });
+
+        if ($this->writeRows(array_column($merged, "row")) === false) {
+            return false;
+        }
+        return ["imported" => $imported, "duplicates" => $duplicates];
+    }
+
+    /**
+     * Reads the valid rows of a CSV, each as ["row" => string[], "date" => DateTime]. Invalid rows
+     * are skipped.
+     *
+     * @param string $file
+     * @return array
+     */
+    private function readValidRows($file)
+    {
+        $rows = [];
+        $handle = @fopen($file, "r");
+        if ($handle === false) {
+            return $rows;
+        }
+        while (($row = fgetcsv($handle, 1000, ",", "\"", "")) !== false) {
+            $dataRow = self::parseRow($row);
+            if ($dataRow !== false) {
+                $rows[] = ["row" => $row, "date" => $dataRow->date];
+            }
+        }
+        fclose($handle);
+        return $rows;
+    }
+
+    /**
+     * Writes the given rows to the data file atomically (temp file + rename); leaves the original
+     * untouched and returns false on any write failure.
+     *
+     * @param string[][] $rows
+     * @return bool
+     */
+    private function writeRows($rows)
+    {
+        $tmp = $this->dataFile . ".tmp";
+        $out = @fopen($tmp, "w");
+        if ($out === false) {
+            return false;
+        }
+
+        $ok = true;
+        foreach ($rows as $row) {
+            if (fputcsv($out, $row, ",", "\"", "") === false) {
+                $ok = false;
+                break;
+            }
+        }
+
+        return $this->commitTemp($out, $tmp, $ok);
+    }
+
+    /**
+     * Finishes an atomic write: closes the temp handle, then either renames it over the data file or
+     * discards it. Returns whether the data file is intact. Pass $changed = false to skip the rename
+     * (nothing to write) while still reporting success.
+     *
+     * @param resource $out Open temp file handle
+     * @param string $tmp Temp file path
+     * @param bool $ok Whether the writes so far succeeded
+     * @param bool $changed Whether anything actually changed
+     * @return bool
+     */
+    private function commitTemp($out, $tmp, $ok, $changed = true)
+    {
+        // fclose flushes buffered writes; a failure here means the temp file is incomplete.
+        if (fclose($out) === false) {
+            $ok = false;
+        }
+        if (!$ok || !$changed) {
+            @unlink($tmp);
+            return $ok;
+        }
+        return @rename($tmp, $this->dataFile);
     }
 
     /**
@@ -2035,6 +2155,22 @@ function showAlert($message)
 }
 
 /**
+ * Shows a blocking alert with the given buttons and returns the chosen button name (or "" if none).
+ *
+ * @param string $message Alert message
+ * @param string[] $buttons Button names, e.g. ["Cancel", "OK"]
+ * @param string $default Default button name
+ * @return string
+ */
+function confirmDialog($message, $buttons, $default)
+{
+    $buttonList = '{"' . implode('", "', $buttons) . '"}';
+    $alert = 'display alert "' . escapeAppleScript(Strings::UPDATE_ALERT_TITLE) . '" message "' . escapeAppleScript($message) . '" buttons ' . $buttonList . ' default button "' . $default . '"';
+    // Second -e returns just the clicked button name (the alert itself returns "button returned:X").
+    return @trim(shell_exec("osascript -e " . escapeshellarg($alert) . " -e " . escapeshellarg("button returned of result")) ?? "");
+}
+
+/**
  * Processes a configuration change command from CLI arguments.
  *
  * @param string[] $argv CLI arguments
@@ -2113,6 +2249,24 @@ function copyFile($source, $destination) {
         $error = "Unknown error";
     }
     return $result ? null : $error;
+}
+
+/**
+ * Backs up the data file next to itself as "<name>.backup.<timestamp>.<ext>" before a destructive
+ * operation. The backup is kept (the plugin only ever reads the exact data file name).
+ *
+ * @param string $dataFilePath Path to the data file
+ * @return string|null Path to the backup, or null if there was nothing to back up
+ */
+function backupDataFile($dataFilePath) {
+    if (!file_exists($dataFilePath)) {
+        return null;
+    }
+    $info = pathinfo($dataFilePath);
+    $timestamp = (new DateTime())->format("Y-m-d_His");
+    $backup = $info["dirname"] . DIRECTORY_SEPARATOR . $info["filename"] . ".backup." . $timestamp . "." . $info["extension"];
+    copyFile($dataFilePath, $backup);
+    return $backup;
 }
 
 /**
