@@ -57,11 +57,13 @@ final class Strings
     const ROW_BUILD_COUNTS_NO_BUILDS = 'Builds: no builds yet';
     const ROW_BUILD_TIME = 'Build time: %s'; // %s will be replaced with corresponding build time
     const ROW_AVERAGE_BUILD_TIME = 'Average build time: %s'; // %s will be replaced with corresponding build time
+    const ROW_MEDIAN_BUILD_TIME = 'Median build time: %s'; // %s will be replaced with corresponding build time
 
     const ROW_SUCCESS_BUILD_TIME = 'Success: %s'; // %s will be replaced with corresponding build time
     const ROW_FAIL_BUILD_TIME = 'Fail: %s'; // %s will be replaced with corresponding build time
 
     const ROW_DAILY_AVERAGE_BUILD_TIME = 'Daily average: %1$s, %2$s builds'; // // %1$s will be replaced with corresponding build time, %1$s with build counts
+    const ROW_DAILY_MEDIAN_BUILD_TIME = 'Daily median: %1$s, %2$s builds'; // %1$s will be replaced with corresponding build time, %2$s with build counts
     const ROW_DAILY_SUCCESS_BUILD_TIME = 'Success: %1$s, %2$s builds'; // %1$s will be replaced with corresponding build time, %1$s with build counts
     const ROW_DAILY_FAIL_BUILD_TIME = 'Fail: %1$s, %2$s builds'; // %1$s will be replaced with corresponding build time, %1$s with build counts
 
@@ -87,6 +89,9 @@ final class Strings
     const ROW_SETTINGS_FILTER_MACHINE = "Machine";
     const ROW_SETTINGS_FILTER_MACHINE_CURRENT = "(this Mac)";
     const ROW_SETTINGS_FILTER_MACHINE_UNKNOWN = "(unknown)";
+    const ROW_SETTINGS_STATISTICS = "Statistics";
+    const ROW_SETTINGS_STATISTICS_AVERAGE = "Average";
+    const ROW_SETTINGS_STATISTICS_MEDIAN = "Median";
     const ROW_SETTINGS_DATA = "Data";
     const ROW_SETTINGS_DATA_EXPORT = "Export";
     const ROW_SETTINGS_DATA_IMPORT = "Import";
@@ -429,13 +434,10 @@ final class BuildTimesFileParser
             }
 
             // Daily data
-            $days = 0;
-            $bt = 0;
-            $sbt = 0;
-            $fbt = 0;
-            $bc = 0;
-            $sbc = 0;
-            $fbc = 0;
+            /** @var BuildTimesValues[] $dayTimes */
+            $dayTimes = [];
+            /** @var BuildTimesValues[] $dayCounts */
+            $dayCounts = [];
 
             foreach ($rows as $key => $data) {
                 // Count only past days
@@ -443,26 +445,27 @@ final class BuildTimesFileParser
                     continue;
                 }
 
-                $dayData = $this->getData($data);
-                $days++;
-                $bt += $dayData->buildTime;
-                $sbt += $dayData->successBuildTime;
-                $fbt += $dayData->failBuildTime;
-                $bc += $dayData->buildCount;
-                $sbc += $dayData->successCount;
-                $fbc += $dayData->failCount;
+                // Medians are taken over the daily totals below, not within a single day
+                $dayData = $this->getData($data, false);
+                $dayTimes[] = $dayData->time;
+                $dayCounts[] = $dayData->counts;
             }
 
+            $days = count($dayTimes);
             if ($days > 0) {
+                $average = function ($values) use ($days) {
+                    return intval(array_sum($values) / $days);
+                };
+                $median = function ($values) {
+                    return self::median(array_count_values($values));
+                };
+
                 $dailyData = new DailyTimesData();
                 $dailyData->days = $days;
-                $dailyData->averageBuildTime = intval($bt / $days);
-                $dailyData->averageSuccessBuildTime = intval($sbt / $days);
-                $dailyData->averageFailBuildTime = intval($fbt / $days);
-
-                $dailyData->averageBuildCount = intval($bc / $days);
-                $dailyData->averageSuccessCount = intval($sbc / $days);
-                $dailyData->averageFailCount = intval($fbc / $days);
+                $dailyData->averageTime = self::reduceValues($dayTimes, $average);
+                $dailyData->averageCount = self::reduceValues($dayCounts, $average);
+                $dailyData->medianTime = self::reduceValues($dayTimes, $median);
+                $dailyData->medianCount = self::reduceValues($dayCounts, $median);
 
                 $result->dailyData = $dailyData;
             }
@@ -471,6 +474,7 @@ final class BuildTimesFileParser
         $result->selectedWorkspaces = $config->selectedWorkspaces;
         $result->selectedProjects = $config->selectedProjects;
         $result->selectedMachines = $config->selectedMachines;
+        $result->selectedStatistics = $config->selectedStatistics;
         $result->currentMachineId = $config->currentMachineId;
         $result->currentMachineSpec = $config->currentMachineSpec;
 
@@ -879,10 +883,11 @@ final class BuildTimesFileParser
 
     /**
      * @param DataRow[] $rows
+     * @param bool $withMedians Whether to compute the medians, they are left null when not asked for
      *
      * @return BuildTimesData
      */
-    private function getData($rows)
+    private function getData($rows, $withMedians = true)
     {
         $buildTime = 0;
         $buildCount = 0;
@@ -891,15 +896,29 @@ final class BuildTimesFileParser
         $failBuildTime = 0;
         $successBuildTime = 0;
 
+        // Durations counted per value, so the medians need no sorted copy of every row
+        $durations = [];
+        $successDurations = [];
+        $failDurations = [];
+
         foreach ($rows as $row) {
             $buildCount++;
+            if ($withMedians) {
+                $durations[$row->count] = ($durations[$row->count] ?? 0) + 1;
+            }
 
             if ($row->type == "success") {
                 $successCount++;
                 $successBuildTime += $row->count;
+                if ($withMedians) {
+                    $successDurations[$row->count] = ($successDurations[$row->count] ?? 0) + 1;
+                }
             } else {
                 $failCount++;
                 $failBuildTime += $row->count;
+                if ($withMedians) {
+                    $failDurations[$row->count] = ($failDurations[$row->count] ?? 0) + 1;
+                }
             }
 
             $buildTime += $row->count;
@@ -910,19 +929,86 @@ final class BuildTimesFileParser
         $averageSuccessBuildTime = intval($successCount === 0 ? 0 : $successBuildTime / $successCount);
 
         $result = new BuildTimesData();
-        $result->buildCount = $buildCount;
-        $result->successCount = $successCount;
-        $result->failCount = $failCount;
-        $result->averageBuildTime = $averageBuildTime;
-        $result->averageSuccessBuildTime = $averageSuccessBuildTime;
-        $result->averageFailBuildTime = $averageFailBuildTime;
-        $result->buildTime = $buildTime;
-        $result->successBuildTime = $successBuildTime;
-        $result->failBuildTime = $failBuildTime;
+        $result->counts = new BuildTimesValues($buildCount, $successCount, $failCount);
+        $result->time = new BuildTimesValues($buildTime, $successBuildTime, $failBuildTime);
+        $result->average = new BuildTimesValues($averageBuildTime, $averageSuccessBuildTime, $averageFailBuildTime);
+        $result->median = $withMedians ? new BuildTimesValues(
+            self::median($durations),
+            self::median($successDurations),
+            self::median($failDurations)
+        ) : null;
         $result->dataFrom = !empty($rows) ? reset($rows)->date : null;
         $result->dataTo = !empty($rows) ? end($rows)->date : null;
 
         return $result;
+    }
+
+    /**
+     * Combines a list of values into a single one, reducing all, success and fail separately.
+     *
+     * @param BuildTimesValues[] $values
+     * @param callable $reduce Turns a list of ints into the one to keep
+     * @return BuildTimesValues
+     */
+    private static function reduceValues($values, $reduce)
+    {
+        return new BuildTimesValues(
+            $reduce(array_column($values, "all")),
+            $reduce(array_column($values, "success")),
+            $reduce(array_column($values, "fail"))
+        );
+    }
+
+    /**
+     * Returns the median of the values counted in a histogram (value => number of occurrences).
+     *
+     * @param int[] $histogram Number of occurrences keyed by value
+     * @return int
+     */
+    private static function median($histogram)
+    {
+        return self::percentileOfHistogram($histogram, 50);
+    }
+
+    /**
+     * Returns the given percentile of the values counted in a histogram (value => number of
+     * occurrences), or 0 when the histogram is empty. Ranks are interpolated between the two
+     * neighbouring values, so percentile 50 is the usual median. Counting the values instead of
+     * collecting them means only the distinct ones are sorted.
+     *
+     * @param int[] $histogram Number of occurrences keyed by value
+     * @param int $percentile Percentile to return, clamped to 0-100
+     * @return int
+     */
+    private static function percentileOfHistogram($histogram, $percentile)
+    {
+        $count = array_sum($histogram);
+        if ($count === 0) {
+            return 0;
+        }
+
+        ksort($histogram);
+
+        $percentile = max(0, min(100, $percentile));
+        $rank = ($count - 1) * $percentile / 100;
+        $lowerIndex = intval(floor($rank));
+        $upperIndex = intval(ceil($rank));
+
+        $lowerValue = null;
+        $upperValue = null;
+        $seen = 0;
+        foreach ($histogram as $value => $occurrences) {
+            $seen += $occurrences;
+            if ($lowerValue === null && $seen > $lowerIndex) {
+                $lowerValue = $value;
+            }
+            if ($seen > $upperIndex) {
+                $upperValue = $value;
+                break;
+            }
+        }
+
+        return intval($lowerValue + ($upperValue - $lowerValue) * ($rank - $lowerIndex));
     }
 
     /**
@@ -988,6 +1074,9 @@ final class BuildTimesConfig
     /** @var string[] - empty means all, "" means unknown, "@current" means the current machine, otherwise specific ids */
     var $selectedMachines = [];
 
+    /** @var string[] - which statistics to show, never empty */
+    var $selectedStatistics = [self::statisticAverage];
+
     /** @var string - id of the machine the plugin currently runs on */
     var $currentMachineId = "";
 
@@ -1000,9 +1089,13 @@ final class BuildTimesConfig
     /** @var bool */
     private $localTimeZoneAutodetect = true;
 
+    const statisticAverage = "average";
+    const statisticMedian = "median";
+
     const selectedWorkspacesKey = "selectedWorkspaces";
     const selectedProjectsKey = "selectedProjects";
     const selectedMachinesKey = "selectedMachines";
+    const selectedStatisticsKey = "selectedStatistics";
     const selectedLocalTimeZoneKey = "localTimeZone";
 
     /**
@@ -1059,6 +1152,20 @@ final class BuildTimesConfig
             }
         }
 
+        if (key_exists(self::selectedStatisticsKey, $json) && is_array($json[self::selectedStatisticsKey])) {
+            $selectedStatistics = [];
+            foreach ($json[self::selectedStatisticsKey] as $selectedStatistic) {
+                if ($selectedStatistic !== self::statisticAverage && $selectedStatistic !== self::statisticMedian) {
+                    continue;
+                }
+                $selectedStatistics[] = $selectedStatistic;
+            }
+            // Keep the default when nothing valid is left, there must always be something to show
+            if (!empty($selectedStatistics)) {
+                $this->selectedStatistics = $selectedStatistics;
+            }
+        }
+
         if (key_exists(self::selectedLocalTimeZoneKey, $json) && is_string($json[self::selectedLocalTimeZoneKey])) {
             try {
                 $timeZoneString = $json[self::selectedLocalTimeZoneKey];
@@ -1084,6 +1191,8 @@ final class BuildTimesConfig
         $key = array_search($name, $this->selectedWorkspaces, true);
         if ($key !== false) {
             unset($this->selectedWorkspaces[$key]);
+            // Reindex, otherwise the gap makes json_encode write an object instead of an array
+            $this->selectedWorkspaces = array_values($this->selectedWorkspaces);
         } else {
             if ($add) {
                 $this->selectedWorkspaces[] = $name;
@@ -1105,6 +1214,7 @@ final class BuildTimesConfig
         $key = array_search($name, $this->selectedProjects, true);
         if ($key !== false) {
             unset($this->selectedProjects[$key]);
+            $this->selectedProjects = array_values($this->selectedProjects);
         } else {
             if ($add) {
                 $this->selectedProjects[] = $name;
@@ -1128,10 +1238,35 @@ final class BuildTimesConfig
         $key = array_search($machineId, $this->selectedMachines, true);
         if ($key !== false) {
             unset($this->selectedMachines[$key]);
+            $this->selectedMachines = array_values($this->selectedMachines);
         } elseif ($add) {
             $this->selectedMachines[] = $machineId;
         } else {
             $this->selectedMachines = [$machineId];
+        }
+    }
+
+    /**
+     * Toggles statistic selection. If add is false, replaces current selection. Deselecting the last
+     * one falls back to the average, so the menu always shows something.
+     *
+     * @param string $name Statistic name, one of the statistic* constants
+     * @param bool $add Whether to add to current selection or replace it
+     */
+    function toggleStatistic($name, $add)
+    {
+        $key = array_search($name, $this->selectedStatistics, true);
+        if ($key !== false) {
+            unset($this->selectedStatistics[$key]);
+            $this->selectedStatistics = array_values($this->selectedStatistics);
+        } elseif ($add) {
+            $this->selectedStatistics[] = $name;
+        } else {
+            $this->selectedStatistics = [$name];
+        }
+
+        if (empty($this->selectedStatistics)) {
+            $this->selectedStatistics = [self::statisticAverage];
         }
     }
 
@@ -1156,6 +1291,7 @@ final class BuildTimesConfig
             self::selectedProjectsKey => $this->selectedProjects,
             self::selectedWorkspacesKey => $this->selectedWorkspaces,
             self::selectedMachinesKey => $this->selectedMachines,
+            self::selectedStatisticsKey => $this->selectedStatistics,
         ];
 
         if ($this->localTimeZone !== null && $this->localTimeZoneAutodetect === false) {
@@ -1229,7 +1365,7 @@ final class BitBarRenderer
     private function renderHeader()
     {
         $row = "";
-        $buildTime = @$this->data->todayData->buildTime ?: 0;
+        $buildTime = $this->data->todayData?->time->all ?: 0;
         $inProgressTime = array_sum($this->data->inProgress);
         $row .= $this->format($buildTime + $inProgressTime);
 
@@ -1304,57 +1440,28 @@ final class BitBarRenderer
         $rows[] = $this->getBuildCountsRow($todayData);
         $rows[] = $this->getBuildCountsRow($totalData) . $alternate;
 
-        $todayBuildTime = $this->getFormatedTimeRow($todayData, "buildTime", Strings::ROW_BUILD_TIME);
-        $totalBuildTime = $this->getFormatedTimeRow($totalData, "buildTime", Strings::ROW_BUILD_TIME);
-
-        $todaySuccessBuildTime = $this->getFormatedTimeRow($todayData, "successBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
-        $totalSuccessBuildTime = $this->getFormatedTimeRow($totalData, "successBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
-
-        $todayFailBuildTime = $this->getFormatedTimeRow($todayData, "failBuildTime", Strings::ROW_FAIL_BUILD_TIME);
-        $totalFailBuildTime = $this->getFormatedTimeRow($totalData, "failBuildTime", Strings::ROW_FAIL_BUILD_TIME);
-
-        $todayAverageBuildTime = $this->getFormatedTimeRow($todayData, "averageBuildTime", Strings::ROW_AVERAGE_BUILD_TIME);
-
-        $todayAverageSuccessBuildTime = $this->getFormatedTimeRow($todayData, "averageSuccessBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
-        $totalAverageSuccessBuildTime = $this->getFormatedTimeRow($totalData, "averageSuccessBuildTime", Strings::ROW_SUCCESS_BUILD_TIME);
-        $todayAverageFailBuildTime = $this->getFormatedTimeRow($todayData, "averageFailBuildTime", Strings::ROW_FAIL_BUILD_TIME);
-        $totalAverageFailBuildTime = $this->getFormatedTimeRow($totalData, "averageFailBuildTime", Strings::ROW_FAIL_BUILD_TIME);
-        $totalAverageBuildTime = $this->getFormatedTimeRow($totalData, "averageBuildTime", Strings::ROW_AVERAGE_BUILD_TIME);
-
         // Build time
 
-        $buildTimeSubMenu = [];
-        $buildTimeSubMenu[] = "-- " . $todaySuccessBuildTime;
-        $buildTimeSubMenu[] = "-- " . $totalSuccessBuildTime . $alternate;
-        $buildTimeSubMenu[] = "-- " . $todayFailBuildTime;
-        $buildTimeSubMenu[] = "-- " . $totalFailBuildTime . $alternate;
+        $rows = array_merge($rows, $this->getBuildStatisticRows("time", Strings::ROW_BUILD_TIME));
 
-        $rows[] = $todayBuildTime;
-        $rows = array_merge($rows, $buildTimeSubMenu);
+        // Average and median build time
 
-        $rows[] = $totalBuildTime . $alternate;
-        $rows = array_merge($rows, $buildTimeSubMenu);
-
-        // Average build time
-
-        $averageBuildTimeSubMenu = [];
-        $averageBuildTimeSubMenu[] = "-- " . $todayAverageSuccessBuildTime;
-        $averageBuildTimeSubMenu[] = "-- " . $totalAverageSuccessBuildTime . $alternate;
-        $averageBuildTimeSubMenu[] = "-- " . $todayAverageFailBuildTime;
-        $averageBuildTimeSubMenu[] = "-- " . $totalAverageFailBuildTime . $alternate;
-
-        $rows[] = $todayAverageBuildTime;
-        $rows = array_merge($rows, $averageBuildTimeSubMenu);
-
-        $rows[] = $totalAverageBuildTime . $alternate;
-        $rows = array_merge($rows, $averageBuildTimeSubMenu);
+        if ($this->isStatisticSelected(BuildTimesConfig::statisticAverage)) {
+            $rows = array_merge($rows, $this->getBuildStatisticRows(BuildTimesConfig::statisticAverage, Strings::ROW_AVERAGE_BUILD_TIME));
+        }
+        if ($this->isStatisticSelected(BuildTimesConfig::statisticMedian)) {
+            $rows = array_merge($rows, $this->getBuildStatisticRows(BuildTimesConfig::statisticMedian, Strings::ROW_MEDIAN_BUILD_TIME));
+        }
 
         // Daily data
 
         if ($dailyData !== null) {
-            $rows[] = sprintf(Strings::ROW_DAILY_AVERAGE_BUILD_TIME, $this->format($dailyData->averageBuildTime), $dailyData->averageBuildCount);
-            $rows[] = "-- " . sprintf(Strings::ROW_DAILY_SUCCESS_BUILD_TIME, $this->format($dailyData->averageSuccessBuildTime), $dailyData->averageSuccessCount);
-            $rows[] = "-- " . sprintf(Strings::ROW_DAILY_FAIL_BUILD_TIME, $this->format($dailyData->averageFailBuildTime), $dailyData->averageFailCount);
+            if ($this->isStatisticSelected(BuildTimesConfig::statisticAverage)) {
+                $rows = array_merge($rows, $this->getDailyStatisticRows($dailyData->averageTime, $dailyData->averageCount, Strings::ROW_DAILY_AVERAGE_BUILD_TIME));
+            }
+            if ($this->isStatisticSelected(BuildTimesConfig::statisticMedian)) {
+                $rows = array_merge($rows, $this->getDailyStatisticRows($dailyData->medianTime, $dailyData->medianCount, Strings::ROW_DAILY_MEDIAN_BUILD_TIME));
+            }
         }
 
         if ($this->data->lastBuild !== null) {
@@ -1370,6 +1477,53 @@ final class BitBarRenderer
     }
 
     /**
+     * Returns one set of build duration values: today's row with its success/fail submenu, followed
+     * by the same for the total on the alternate.
+     *
+     * @param string $property Values property of BuildTimesData, e.g. "average"
+     * @param string $title Row title template
+     * @return string[]
+     */
+    private function getBuildStatisticRows($property, $title)
+    {
+        $alternate = "| alternate=true";
+        $todayValues = $this->getValues($this->data->todayData, $property);
+        $totalValues = $this->getValues($this->data->totalData, $property);
+
+        $subMenu = [];
+        $subMenu[] = "-- " . $this->getFormatedTimeRow($todayValues?->success, Strings::ROW_SUCCESS_BUILD_TIME);
+        $subMenu[] = "-- " . $this->getFormatedTimeRow($totalValues?->success, Strings::ROW_SUCCESS_BUILD_TIME) . $alternate;
+        $subMenu[] = "-- " . $this->getFormatedTimeRow($todayValues?->fail, Strings::ROW_FAIL_BUILD_TIME);
+        $subMenu[] = "-- " . $this->getFormatedTimeRow($totalValues?->fail, Strings::ROW_FAIL_BUILD_TIME) . $alternate;
+
+        $rows = [];
+        $rows[] = $this->getFormatedTimeRow($todayValues?->all, $title);
+        $rows = array_merge($rows, $subMenu);
+        $rows[] = $this->getFormatedTimeRow($totalValues?->all, $title) . $alternate;
+        $rows = array_merge($rows, $subMenu);
+
+        return $rows;
+    }
+
+    /**
+     * Returns one statistic of the daily totals, with its success/fail submenu.
+     *
+     * @param BuildTimesValues $times
+     * @param BuildTimesValues $counts
+     * @param string $title Row title template
+     * @return string[]
+     */
+    private function getDailyStatisticRows($times, $counts, $title)
+    {
+        $rows = [];
+        $rows[] = sprintf($title, $this->format($times->all), $counts->all);
+        $rows[] = "-- " . sprintf(Strings::ROW_DAILY_SUCCESS_BUILD_TIME, $this->format($times->success), $counts->success);
+        $rows[] = "-- " . sprintf(Strings::ROW_DAILY_FAIL_BUILD_TIME, $this->format($times->fail), $counts->fail);
+
+        return $rows;
+    }
+
+    /**
      * @param BuildTimesData $data
      * @return string
      */
@@ -1379,25 +1533,34 @@ final class BitBarRenderer
             return Strings::ROW_BUILD_COUNTS_NO_BUILDS;
         }
 
-        return sprintf(Strings::ROW_BUILD_COUNTS, $data->buildCount, $data->successCount, $data->failCount);
+        return sprintf(Strings::ROW_BUILD_COUNTS, $data->counts->all, $data->counts->success, $data->counts->fail);
     }
 
     /**
+     * Returns one set of values of the given data, or null when there is no data at all.
+     *
      * @param BuildTimesData $data
-     * @param string $property
+     * @param string $property Values property of BuildTimesData, e.g. "average"
+     * @return BuildTimesValues|null
+     */
+    private function getValues($data, $property)
+    {
+        return $data === null ? null : $data->{$property};
+    }
+
+    /**
+     * @param int|null $seconds
      * @param string $title
      *
      * @return string
      */
-    private function getFormatedTimeRow($data, $property, $title)
+    private function getFormatedTimeRow($seconds, $title)
     {
-        if ($data === null) {
+        if ($seconds === null) {
             return sprintf($title, Strings::MSG_NO_BUILDS_YET);
         }
 
-        $formatted = $this->format($data->{$property});
-
-        return sprintf($title, $formatted);
+        return sprintf($title, $this->format($seconds));
     }
 
     /**
@@ -1427,6 +1590,7 @@ final class BitBarRenderer
         $this->renderRows($rows);
 
         $this->renderFilter();
+        $this->renderStatistics();
 
         $rows = [];
         $rows[] = "-- " . Strings::ROW_SETTINGS_DATA;
@@ -1509,6 +1673,30 @@ final class BitBarRenderer
     }
 
     /**
+     * Renders the statistics submenu, where the statistics shown in the menu are picked.
+     */
+    private function renderStatistics()
+    {
+        $check = "✔ ";
+        $alternate = " alternate=true";
+        $statistics = [
+            BuildTimesConfig::statisticAverage => Strings::ROW_SETTINGS_STATISTICS_AVERAGE,
+            BuildTimesConfig::statisticMedian => Strings::ROW_SETTINGS_STATISTICS_MEDIAN,
+        ];
+
+        $rows = [];
+        $rows[] = "-- " . Strings::ROW_SETTINGS_STATISTICS;
+
+        foreach ($statistics as $statistic => $label) {
+            $row = "---- " . ($this->isStatisticSelected($statistic) ? $check : "") . $label;
+            $rows[] = $row . $this->getActionForStatisticSelection($statistic, false);
+            $rows[] = $row . $this->getActionForStatisticSelection($statistic, true) . $alternate;
+        }
+
+        $this->renderRows($rows);
+    }
+
+    /**
      * Sanitizes a name for display in the menu bar by replacing newlines and pipes.
      *
      * @param string $name Name to sanitize
@@ -1540,6 +1728,15 @@ final class BitBarRenderer
             $labels[] = isset($this->data->machines[$id]) ? $this->data->machines[$id] : $id;
         }
         return $labels;
+    }
+
+    /**
+     * @param string $statistic One of the BuildTimesConfig::statistic* constants
+     * @return bool
+     */
+    private function isStatisticSelected($statistic)
+    {
+        return in_array($statistic, $this->data->selectedStatistics, true);
     }
 
     /**
@@ -1636,25 +1833,64 @@ final class BitBarRenderer
         if ($data === null) {
             $lines[] = Strings::ROW_BUILD_COUNTS_NO_BUILDS;
         } else {
-            $lines[] = sprintf(Strings::ROW_BUILD_COUNTS, $data->buildCount, $data->successCount, $data->failCount);
-            $lines[] = sprintf(Strings::ROW_BUILD_TIME, $this->format($data->buildTime));
-            $lines[] = "  " . sprintf(Strings::ROW_SUCCESS_BUILD_TIME, $this->format($data->successBuildTime));
-            $lines[] = "  " . sprintf(Strings::ROW_FAIL_BUILD_TIME, $this->format($data->failBuildTime));
-            $lines[] = sprintf(Strings::ROW_AVERAGE_BUILD_TIME, $this->format($data->averageBuildTime));
-            $lines[] = "  " . sprintf(Strings::ROW_SUCCESS_BUILD_TIME, $this->format($data->averageSuccessBuildTime));
-            $lines[] = "  " . sprintf(Strings::ROW_FAIL_BUILD_TIME, $this->format($data->averageFailBuildTime));
+            $lines[] = sprintf(Strings::ROW_BUILD_COUNTS, $data->counts->all, $data->counts->success, $data->counts->fail);
+            $lines = array_merge($lines, $this->getSharedBuildStatisticLines($data->time, Strings::ROW_BUILD_TIME));
+            if ($this->isStatisticSelected(BuildTimesConfig::statisticAverage)) {
+                $lines = array_merge($lines, $this->getSharedBuildStatisticLines($data->average, Strings::ROW_AVERAGE_BUILD_TIME));
+            }
+            if ($this->isStatisticSelected(BuildTimesConfig::statisticMedian)) {
+                $lines = array_merge($lines, $this->getSharedBuildStatisticLines($data->median, Strings::ROW_MEDIAN_BUILD_TIME));
+            }
         }
 
         if ($dailyData !== null) {
-            $lines[] = sprintf(Strings::ROW_DAILY_AVERAGE_BUILD_TIME, $this->format($dailyData->averageBuildTime), $dailyData->averageBuildCount);
-            $lines[] = "  " . sprintf(Strings::ROW_DAILY_SUCCESS_BUILD_TIME, $this->format($dailyData->averageSuccessBuildTime), $dailyData->averageSuccessCount);
-            $lines[] = "  " . sprintf(Strings::ROW_DAILY_FAIL_BUILD_TIME, $this->format($dailyData->averageFailBuildTime), $dailyData->averageFailCount);
+            if ($this->isStatisticSelected(BuildTimesConfig::statisticAverage)) {
+                $lines = array_merge($lines, $this->getSharedDailyStatisticLines($dailyData->averageTime, $dailyData->averageCount, Strings::ROW_DAILY_AVERAGE_BUILD_TIME));
+            }
+            if ($this->isStatisticSelected(BuildTimesConfig::statisticMedian)) {
+                $lines = array_merge($lines, $this->getSharedDailyStatisticLines($dailyData->medianTime, $dailyData->medianCount, Strings::ROW_DAILY_MEDIAN_BUILD_TIME));
+            }
         }
 
         $lines[] = "";
         $lines[] = sprintf(Strings::SHARE_FOOTER, Config::ABOUT_URL);
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Returns one set of build duration values for the shared text.
+     *
+     * @param BuildTimesValues $values
+     * @param string $title Line title template
+     * @return string[]
+     */
+    private function getSharedBuildStatisticLines($values, $title)
+    {
+        $lines = [];
+        $lines[] = sprintf($title, $this->format($values->all));
+        $lines[] = "  " . sprintf(Strings::ROW_SUCCESS_BUILD_TIME, $this->format($values->success));
+        $lines[] = "  " . sprintf(Strings::ROW_FAIL_BUILD_TIME, $this->format($values->fail));
+
+        return $lines;
+    }
+
+    /**
+     * Returns one statistic of the daily totals for the shared text.
+     *
+     * @param BuildTimesValues $times
+     * @param BuildTimesValues $counts
+     * @param string $title Line title template
+     * @return string[]
+     */
+    private function getSharedDailyStatisticLines($times, $counts, $title)
+    {
+        $lines = [];
+        $lines[] = sprintf($title, $this->format($times->all), $counts->all);
+        $lines[] = "  " . sprintf(Strings::ROW_DAILY_SUCCESS_BUILD_TIME, $this->format($times->success), $counts->success);
+        $lines[] = "  " . sprintf(Strings::ROW_DAILY_FAIL_BUILD_TIME, $this->format($times->fail), $counts->fail);
+
+        return $lines;
     }
 
     /**
@@ -1675,6 +1911,20 @@ final class BitBarRenderer
         }
         $mode = $add ? "add" : "set";
         return "| bash='" . __FILE__ . "' param1=config param2=filter_toggle param3=$type param4=\"$name\" param5=$mode refresh=true terminal=false";
+    }
+
+    /**
+     * Returns the SwiftBar action string for a statistics selection menu item.
+     * Statistic names are fixed constants, so they need no escaping.
+     *
+     * @param string $statistic One of the BuildTimesConfig::statistic* constants
+     * @param bool $add Whether to add to current selection or replace it
+     * @return string SwiftBar action string
+     */
+    private function getActionForStatisticSelection($statistic, $add)
+    {
+        $mode = $add ? "add" : "set";
+        return "| bash='" . __FILE__ . "' param1=config param2=statistic_toggle param3=$statistic param4=$mode refresh=true terminal=false";
     }
 }
 
@@ -1706,32 +1956,49 @@ final class BuildTimesOutput
     var $selectedProjects = [];
     /** @var string[] - empty means all, "" means unknown, "@current" means the current machine, otherwise specific ids */
     var $selectedMachines = [];
+    /** @var string[] - which statistics to show */
+    var $selectedStatistics = [];
     /** @var string - id of the machine the plugin currently runs on */
     var $currentMachineId = "";
     /** @var string - spec of the current machine */
     var $currentMachineSpec = "";
 }
 
-final class BuildTimesData
+/**
+ * One value for all builds and the same split by result, as every number in the menu is shown.
+ */
+final class BuildTimesValues
 {
     /** @var int */
-    var $buildCount;
+    var $all;
     /** @var int */
-    var $successCount;
+    var $success;
     /** @var int */
-    var $failCount;
-    /** @var int */
-    var $averageBuildTime;
-    /** @var int */
-    var $averageSuccessBuildTime;
-    /** @var int */
-    var $averageFailBuildTime;
-    /** @var int */
-    var $buildTime;
-    /** @var int */
-    var $successBuildTime;
-    /** @var int */
-    var $failBuildTime;
+    var $fail;
+
+    /**
+     * @param int $all
+     * @param int $success
+     * @param int $fail
+     */
+    public function __construct($all, $success, $fail)
+    {
+        $this->all = $all;
+        $this->success = $success;
+        $this->fail = $fail;
+    }
+}
+
+final class BuildTimesData
+{
+    /** @var BuildTimesValues */
+    var $counts;
+    /** @var BuildTimesValues */
+    var $time;
+    /** @var BuildTimesValues */
+    var $average;
+    /** @var BuildTimesValues */
+    var $median;
     /** @var DateTime */
     var $dataFrom;
     /** @var DateTime */
@@ -1742,18 +2009,14 @@ final class DailyTimesData
 {
     /** @var int */
     var $days;
-    /** @var int */
-    var $averageBuildCount;
-    /** @var int */
-    var $averageSuccessCount;
-    /** @var int */
-    var $averageFailCount;
-    /** @var int */
-    var $averageBuildTime;
-    /** @var int */
-    var $averageSuccessBuildTime;
-    /** @var int */
-    var $averageFailBuildTime;
+    /** @var BuildTimesValues */
+    var $averageTime;
+    /** @var BuildTimesValues */
+    var $averageCount;
+    /** @var BuildTimesValues */
+    var $medianTime;
+    /** @var BuildTimesValues */
+    var $medianCount;
 }
 
 final class DataRow
@@ -2231,6 +2494,17 @@ function processConfigChange($argv, $configFilePath, $machine)
                     }
                     $config->save($configFilePath);
                     break;
+            }
+            break;
+        case "statistic_toggle":
+            $name = isset($argv[3]) ? $argv[3] : "";
+            $mode = isset($argv[4]) ? $argv[4] : "set";
+            if (!preg_match("~set|add~", $mode)) {
+                $mode = "set";
+            }
+            if ($name === BuildTimesConfig::statisticAverage || $name === BuildTimesConfig::statisticMedian) {
+                $config->toggleStatistic($name, $mode === "add");
+                $config->save($configFilePath);
             }
             break;
     }

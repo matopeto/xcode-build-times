@@ -24,7 +24,7 @@ So first install [SwiftBar](https://github.com/swiftbar/SwiftBar#how-to-get-swif
 
 On the first run, select a directory you wish to use as your plugin directory, for example `~/SwiftBarPlugins`.
 
-If you are using macOS Monterey or newer, you must install PHP, because it is not bundled in macOS anymore. E.g. from Homebrew: `brew install php` and you must have the path to `php` executable in PATH variable.
+The plugin needs PHP 8.0 or newer. If you are using macOS Monterey or newer, you must install PHP, because it is not bundled in macOS anymore. E.g. from Homebrew: `brew install php` and you must have the path to `php` executable in PATH variable.
 
 ### Plugin installation
 
