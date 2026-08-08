@@ -16,6 +16,12 @@
 # <swiftbar.hideSwiftBar>true</swiftbar.hideSwiftBar>
 # <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>
 
+const MINIMUM_PHP_VERSION = "8.3";
+if (version_compare(PHP_VERSION, MINIMUM_PHP_VERSION, "<")) {
+    error_log("Unable to run on PHP " . PHP_VERSION . ", " . MINIMUM_PHP_VERSION . " or newer is needed");
+    exit(1);
+}
+
 final class Config
 {
     const ABOUT_URL = "https://github.com/matopeto/xcode-build-times";
@@ -25,6 +31,16 @@ final class Config
     const UPDATE_USER_AGENT = "matopeto/xcode-build-times";
 
     const DATE_FORMAT = "Y-m-d";
+
+    const CLIPBOARD_LOCALE = "en_US.UTF-8"; // Only picked for its encoding, pbcopy reads it from the locale
+
+    const DISTRIBUTION_FONT = "Menlo"; // Must be monospaced, the bars are aligned with spaces
+    // Parts a bar is drawn from, ordered from the whole one down to the smallest
+    const DISTRIBUTION_BAR = ["█", "▉", "▊", "▋", "▌", "▍", "▎", "▏"];
+    const DISTRIBUTION_SHARE_BAR = ["="]; // Plain ASCII, the shared text lands in fonts and encodings we do not control
+    const DISTRIBUTION_BAR_WIDTH = 16; // Characters the longest bar is drawn in
+    const DISTRIBUTION_BUCKETS = 10;
+    const DISTRIBUTION_LABEL_TOLERANCE = 0.1; // How far a rounded bucket label may sit from the real bound
 
     const DATA_FILE_DIR = ".xcodeBuildTimes"; // Must be hidden (start with ".")
     const DATA_FILE_NAME = "buildTimes.csv";
@@ -59,6 +75,13 @@ final class Strings
     const ROW_AVERAGE_BUILD_TIME = 'Average build time: %s'; // %s will be replaced with corresponding build time
     const ROW_MEDIAN_BUILD_TIME = 'Median build time: %s'; // %s will be replaced with corresponding build time
 
+    const ROW_DISTRIBUTION = "Distribution";
+    // Both take the same arguments: %1$s - bucket label, %2$s - bar, %3$s - number of builds, %4$s - share of all builds
+    const ROW_DISTRIBUTION_BUCKET = '%1$s %2$s %3$s %4$s%%';
+    const SHARE_DISTRIBUTION_BUCKET = '%2$s %1$s: %4$s%%, %3$s builds';
+    const ROW_DISTRIBUTION_RANGE = '%1$s-%2$s'; // %1$s - duration the bucket starts at, %2$s - the one it ends at
+    const ROW_DISTRIBUTION_RANGE_OPEN = '%s+'; // %s - duration the last bucket starts at, it has no end
+
     const ROW_SUCCESS_BUILD_TIME = 'Success: %s'; // %s will be replaced with corresponding build time
     const ROW_FAIL_BUILD_TIME = 'Fail: %s'; // %s will be replaced with corresponding build time
 
@@ -69,6 +92,15 @@ final class Strings
 
     const ROW_LAST_BUILD = 'Last build: %1$s, %2$s'; // %1$d will be replaced with status (success/fail) %2$d with duration
     const ROW_BUILD_IN_PROGRESS = 'Build in progress: %s'; // %s will be replaced with current duration of build in progress
+
+    // How a duration is written out, in DateInterval format, the WHOLE ones for nothing left over
+    const FORMAT_SECONDS = '%ss';
+    const FORMAT_MINUTES = '%im %ss';
+    const FORMAT_MINUTES_WHOLE = '%im';
+    const FORMAT_HOURS = '%hh %im';
+    const FORMAT_HOURS_WHOLE = '%hh';
+    const FORMAT_DAYS = '%ad %hh';
+    const FORMAT_DAYS_WHOLE = '%ad';
 
     const ROW_REFRESH = "Refresh";
     const ROW_SHARE = "Share";
@@ -92,6 +124,9 @@ final class Strings
     const ROW_SETTINGS_STATISTICS = "Statistics";
     const ROW_SETTINGS_STATISTICS_AVERAGE = "Average";
     const ROW_SETTINGS_STATISTICS_MEDIAN = "Median";
+    const ROW_SETTINGS_STATISTICS_DISTRIBUTION = "Distribution";
+    const ROW_SETTINGS_STATISTICS_ON = "On";
+    const ROW_SETTINGS_STATISTICS_OFF = "Off";
     const ROW_SETTINGS_DATA = "Data";
     const ROW_SETTINGS_DATA_EXPORT = "Export";
     const ROW_SETTINGS_DATA_IMPORT = "Import";
@@ -221,7 +256,9 @@ if ($idAlertMessage === "Build Started" || $arg === "start") {
     $data = $parser->getOutput($config, $startTimeFilesPattern);
     $renderer = new BitBarRenderer($data, $config);
     $text = $renderer->getShareText($mode);
-    $pipe = popen("pbcopy", "w");
+    // SwiftBar runs the plugin without any locale set, and pbcopy then falls back to an encoding
+    // that mangles everything outside ASCII, such as a workspace or a machine named in one
+    $pipe = popen("LC_CTYPE=" . Config::CLIPBOARD_LOCALE . " pbcopy", "w");
     if ($pipe !== false) {
         fwrite($pipe, $text);
         pclose($pipe);
@@ -414,7 +451,7 @@ final class BuildTimesFileParser
             if (empty($allRows)) {
                 $result->warnings[] = Strings::WARNING_NO_DATA;
             } else {
-                $result->totalData = $this->getData($allRows);
+                $result->totalData = $this->getData($allRows, true, $config->showDistribution);
                 $result->lastBuild = end($allRows);
             }
 
@@ -430,7 +467,7 @@ final class BuildTimesFileParser
             if ($todayKey !== null && key_exists($todayKey, $rows)) {
                 // Today data
                 $todayRows = $rows[$todayKey];
-                $result->todayData = $this->getData($todayRows);
+                $result->todayData = $this->getData($todayRows, true, $config->showDistribution);
             }
 
             // Daily data
@@ -445,7 +482,7 @@ final class BuildTimesFileParser
                     continue;
                 }
 
-                // Medians are taken over the daily totals below, not within a single day
+                // Only the day's totals are needed, the daily medians are taken across the days below
                 $dayData = $this->getData($data, false);
                 $dayTimes[] = $dayData->time;
                 $dayCounts[] = $dayData->counts;
@@ -475,6 +512,7 @@ final class BuildTimesFileParser
         $result->selectedProjects = $config->selectedProjects;
         $result->selectedMachines = $config->selectedMachines;
         $result->selectedStatistics = $config->selectedStatistics;
+        $result->showDistribution = $config->showDistribution;
         $result->currentMachineId = $config->currentMachineId;
         $result->currentMachineSpec = $config->currentMachineSpec;
 
@@ -883,11 +921,14 @@ final class BuildTimesFileParser
 
     /**
      * @param DataRow[] $rows
-     * @param bool $withMedians Whether to compute the medians, they are left null when not asked for
+     * @param bool $withDurations Whether to count the durations, the histogram and the medians read
+     *                            from it are left null when not asked for
+     * @param bool $withDistribution Whether to sort the counted durations into buckets, which is
+     *                               wasted work while the chart is switched off
      *
      * @return BuildTimesData
      */
-    private function getData($rows, $withMedians = true)
+    private function getData($rows, $withDurations = true, $withDistribution = true)
     {
         $buildTime = 0;
         $buildCount = 0;
@@ -903,20 +944,20 @@ final class BuildTimesFileParser
 
         foreach ($rows as $row) {
             $buildCount++;
-            if ($withMedians) {
+            if ($withDurations) {
                 $durations[$row->count] = ($durations[$row->count] ?? 0) + 1;
             }
 
             if ($row->type == "success") {
                 $successCount++;
                 $successBuildTime += $row->count;
-                if ($withMedians) {
+                if ($withDurations) {
                     $successDurations[$row->count] = ($successDurations[$row->count] ?? 0) + 1;
                 }
             } else {
                 $failCount++;
                 $failBuildTime += $row->count;
-                if ($withMedians) {
+                if ($withDurations) {
                     $failDurations[$row->count] = ($failDurations[$row->count] ?? 0) + 1;
                 }
             }
@@ -932,11 +973,12 @@ final class BuildTimesFileParser
         $result->counts = new BuildTimesValues($buildCount, $successCount, $failCount);
         $result->time = new BuildTimesValues($buildTime, $successBuildTime, $failBuildTime);
         $result->average = new BuildTimesValues($averageBuildTime, $averageSuccessBuildTime, $averageFailBuildTime);
-        $result->median = $withMedians ? new BuildTimesValues(
+        $result->median = $withDurations ? new BuildTimesValues(
             self::median($durations),
             self::median($successDurations),
             self::median($failDurations)
         ) : null;
+        $result->distribution = $withDurations && $withDistribution ? self::bucketDurations($durations) : null;
         $result->dataFrom = !empty($rows) ? reset($rows)->date : null;
         $result->dataTo = !empty($rows) ? end($rows)->date : null;
 
@@ -1012,6 +1054,50 @@ final class BuildTimesFileParser
     }
 
     /**
+     * Splits the counted durations into the buckets of the distribution. Build times differ wildly
+     * between projects, so the bounds grow geometrically from the 5th to the 95th percentile, which
+     * leaves only the two tails in the open first and last bucket. They are kept to the second, so
+     * that every bucket covers the same ratio, it is the renderer that rounds their labels.
+     *
+     * @param int[] $histogram Number of occurrences keyed by value
+     * @return int[] Number of builds keyed by the upper bound of the bucket (excluded), the last
+     *               bucket being open ended
+     */
+    private static function bucketDurations($histogram)
+    {
+        if (empty($histogram)) {
+            return [];
+        }
+
+        $lowest = max(1, self::percentileOfHistogram($histogram, 5));
+        $highest = max($lowest * 2, self::percentileOfHistogram($histogram, 95));
+
+        // One bound less than there are buckets, the last one is open ended
+        $steps = Config::DISTRIBUTION_BUCKETS - 2;
+        $bounds = [];
+        for ($step = 0; $step <= $steps; $step++) {
+            $bound = intval(round($lowest * pow($highest / $lowest, $step / $steps)));
+            if (!empty($bounds)) {
+                $bound = max($bound, end($bounds) + 1);
+            }
+            $bounds[] = $bound;
+        }
+        $bounds[] = PHP_INT_MAX;
+
+        $buckets = array_fill_keys($bounds, 0);
+        foreach ($histogram as $duration => $builds) {
+            foreach ($bounds as $bound) {
+                if ($duration < $bound) {
+                    $buckets[$bound] += $builds;
+                    break;
+                }
+            }
+        }
+
+        return $buckets;
+    }
+
+    /**
      * @param DataRow $dataRow
      * @param BuildTimesConfig $config
      * @return bool
@@ -1077,6 +1163,9 @@ final class BuildTimesConfig
     /** @var string[] - which statistics to show, never empty */
     var $selectedStatistics = [self::statisticAverage];
 
+    /** @var bool - whether the distribution chart is shown */
+    var $showDistribution = false;
+
     /** @var string - id of the machine the plugin currently runs on */
     var $currentMachineId = "";
 
@@ -1096,6 +1185,7 @@ final class BuildTimesConfig
     const selectedProjectsKey = "selectedProjects";
     const selectedMachinesKey = "selectedMachines";
     const selectedStatisticsKey = "selectedStatistics";
+    const showDistributionKey = "showDistribution";
     const selectedLocalTimeZoneKey = "localTimeZone";
 
     /**
@@ -1164,6 +1254,10 @@ final class BuildTimesConfig
             if (!empty($selectedStatistics)) {
                 $this->selectedStatistics = $selectedStatistics;
             }
+        }
+
+        if (key_exists(self::showDistributionKey, $json) && is_bool($json[self::showDistributionKey])) {
+            $this->showDistribution = $json[self::showDistributionKey];
         }
 
         if (key_exists(self::selectedLocalTimeZoneKey, $json) && is_string($json[self::selectedLocalTimeZoneKey])) {
@@ -1292,6 +1386,7 @@ final class BuildTimesConfig
             self::selectedWorkspacesKey => $this->selectedWorkspaces,
             self::selectedMachinesKey => $this->selectedMachines,
             self::selectedStatisticsKey => $this->selectedStatistics,
+            self::showDistributionKey => $this->showDistribution,
         ];
 
         if ($this->localTimeZone !== null && $this->localTimeZoneAutodetect === false) {
@@ -1464,6 +1559,12 @@ final class BitBarRenderer
             }
         }
 
+        // Distribution
+
+        if ($this->data->showDistribution) {
+            $rows = array_merge($rows, $this->getDistributionRows());
+        }
+
         if ($this->data->lastBuild !== null) {
             $rows[] = "---";
             $rows[] = sprintf(Strings::ROW_LAST_BUILD, $this->data->lastBuild->type, $this->format($this->data->lastBuild->count));
@@ -1521,6 +1622,171 @@ final class BitBarRenderer
         $rows[] = "-- " . sprintf(Strings::ROW_DAILY_FAIL_BUILD_TIME, $this->format($times->fail), $counts->fail);
 
         return $rows;
+    }
+
+    /**
+     * Returns today's distribution row with a bar chart of the build durations in its submenu,
+     * followed by the same for the total on the alternate.
+     *
+     * @return string[]
+     */
+    private function getDistributionRows()
+    {
+        $alternate = "| alternate=true";
+
+        $rows = $this->getDistributionBlock($this->data->todayData, "");
+        return array_merge($rows, $this->getDistributionBlock($this->data->totalData, $alternate));
+    }
+
+    /**
+     * @param BuildTimesData $data
+     * @param string $alternate
+     * @return string[]
+     */
+    private function getDistributionBlock($data, $alternate)
+    {
+        $rows = [];
+        $rows[] = Strings::ROW_DISTRIBUTION . $alternate;
+
+        $distribution = $data?->distribution;
+        if (empty($distribution)) {
+            $rows[] = "-- " . Strings::MSG_NO_BUILDS_YET;
+            return $rows;
+        }
+
+        foreach ($this->getDistributionLines($distribution, Strings::ROW_DISTRIBUTION_BUCKET, Config::DISTRIBUTION_BAR, true) as $line) {
+            $rows[] = "-- " . $line . "| font=" . Config::DISTRIBUTION_FONT;
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Renders one bar per bucket, the longest one being the most common bucket. Empty buckets are
+     * kept, the gaps are part of the shape and the chart keeps the same height.
+     *
+     * @param int[] $distribution Number of builds keyed by the upper bound of the bucket
+     * @param string $template Line template, taking the same arguments whatever order it puts them in
+     * @param string[] $parts Parts to draw the bars with, ordered from the whole one down to the smallest
+     * @param bool $monospaced Whether the text is monospaced, only then can the columns be padded
+     * @return string[]
+     */
+    private function getDistributionLines($distribution, $template, $parts, $monospaced)
+    {
+        $total = array_sum($distribution);
+        $mostCommon = max($distribution);
+        $labels = $this->getDistributionLabels($distribution);
+
+        // One row of columns per bucket, in the order the templates take them
+        $rows = [];
+        foreach ($distribution as $bound => $builds) {
+            $rows[] = [
+                $labels[$bound],
+                $this->getBar($builds, $mostCommon, $parts),
+                strval($builds),
+                strval(intval(round($builds / $total * 100))),
+            ];
+        }
+
+        if ($monospaced) {
+            // One side per column, in the order the templates number their arguments
+            foreach ([STR_PAD_RIGHT, STR_PAD_RIGHT, STR_PAD_LEFT, STR_PAD_LEFT] as $column => $side) {
+                $width = max(array_map("mb_strlen", array_column($rows, $column)));
+                foreach ($rows as $row => $columns) {
+                    $rows[$row][$column] = mb_str_pad($columns[$column], $width, " ", $side);
+                }
+            }
+        }
+
+        $lines = [];
+        foreach ($rows as $columns) {
+            // Trimmed, a bucket nothing fell into has no bar to start the unpadded line with
+            $lines[] = trim(vsprintf($template, $columns));
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Names every bucket by the range it covers, the last one has no upper bound.
+     *
+     * @param int[] $distribution Number of builds keyed by the upper bound of the bucket
+     * @return string[] Label keyed by the upper bound of the bucket
+     */
+    private function getDistributionLabels($distribution)
+    {
+        $labels = [];
+        $from = 0;
+        $formattedFrom = $this->formatBound($from);
+        foreach (array_keys($distribution) as $bound) {
+            if ($bound === PHP_INT_MAX) {
+                $labels[$bound] = sprintf(Strings::ROW_DISTRIBUTION_RANGE_OPEN, $formattedFrom);
+                continue;
+            }
+
+            $shown = $this->labelBound($bound, $from);
+            $formattedShown = $this->formatBound($shown);
+            $labels[$bound] = sprintf(Strings::ROW_DISTRIBUTION_RANGE, $formattedFrom, $formattedShown);
+            $from = $shown;
+            $formattedFrom = $formattedShown;
+        }
+
+        return $labels;
+    }
+
+    /**
+     * The duration to label a bucket bound with: whole hours, whole minutes or whole seconds,
+     * whichever is the coarsest that neither misstates the bound nor repeats the one before it. A
+     * bound is never rounded up into a unit it does not reach, so nothing below a minute reads as one.
+     *
+     * @param int $bound Real bound of the bucket, in seconds
+     * @param int $previous Duration the bound before it is labelled with
+     *
+     * @return int
+     */
+    private function labelBound($bound, $previous)
+    {
+        foreach ([3600, 60, 1] as $unit) {
+            if ($bound < $unit) {
+                continue;
+            }
+
+            $rounded = intval(round($bound / $unit)) * $unit;
+            if (abs($rounded - $bound) <= Config::DISTRIBUTION_LABEL_TOLERANCE * $bound && $rounded > $previous) {
+                return $rounded;
+            }
+        }
+
+        return max($bound, $previous + 1);
+    }
+
+    /**
+     * Draws one bar out of the parts it is given, so however many of those there are is the
+     * resolution it gets. Anything above zero is worth at least the smallest part.
+     *
+     * @param int $value
+     * @param int $max Value drawn as a full width bar
+     * @param string[] $parts Parts to draw with, ordered from the whole one down to the smallest
+     * @return string
+     */
+    private function getBar($value, $max, $parts)
+    {
+        $steps = count($parts);
+
+        $units = $max === 0 ? 0 : intval(round($value / $max * Config::DISTRIBUTION_BAR_WIDTH * $steps));
+        if ($units === 0 && $value > 0) {
+            $units = 1;
+        }
+
+        $whole = intdiv($units, $steps);
+        $remainder = $units % $steps;
+
+        $bar = str_repeat($parts[0], $whole);
+        if ($remainder > 0) {
+            $bar .= $parts[$steps - $remainder];
+        }
+
+        return $bar;
     }
 
     /**
@@ -1693,6 +1959,12 @@ final class BitBarRenderer
             $rows[] = $row . $this->getActionForStatisticSelection($statistic, true) . $alternate;
         }
 
+        // The chart is not one of a set to pick from, so it gets switched on its own
+        $shown = $this->data->showDistribution;
+        $rows[] = "---- " . Strings::ROW_SETTINGS_STATISTICS_DISTRIBUTION;
+        $rows[] = "------ " . ($shown ? $check : "") . Strings::ROW_SETTINGS_STATISTICS_ON . $this->getActionForDistribution(true);
+        $rows[] = "------ " . ($shown ? "" : $check) . Strings::ROW_SETTINGS_STATISTICS_OFF . $this->getActionForDistribution(false);
+
         $this->renderRows($rows);
     }
 
@@ -1764,24 +2036,38 @@ final class BitBarRenderer
 
     /**
      * @param int $seconds
+     * @param bool $trimZero Whether to leave out a part that is zero anyway, so that a whole minute
+     *                       reads as "1m" and not as "1m 0s"
      *
      * @return string
      */
-    private function format($seconds)
+    private function format($seconds, $trimZero = false)
     {
         $seconds = round($seconds);
         $dtF = new DateTime('@0');
         $dtT = new DateTime("@$seconds");
         $interval = $dtT->diff($dtF);
         if ($seconds < 60) {
-            return "{$seconds}s";
+            return $interval->format(Strings::FORMAT_SECONDS);
         } else if ($seconds < 3600) {
-            return $interval->format("%im %ss");
+            return $interval->format($trimZero && $interval->s === 0 ? Strings::FORMAT_MINUTES_WHOLE : Strings::FORMAT_MINUTES);
         } elseif ($seconds < 86400) {
-            return $interval->format("%hh %im");
+            return $interval->format($trimZero && $interval->i === 0 ? Strings::FORMAT_HOURS_WHOLE : Strings::FORMAT_HOURS);
         } else {
-            return $interval->format("%ad %hh");
+            return $interval->format($trimZero && $interval->h === 0 ? Strings::FORMAT_DAYS_WHOLE : Strings::FORMAT_DAYS);
         }
+    }
+
+    /**
+     * Formats a bucket bound, which reads better without the parts that are zero.
+     *
+     * @param int $seconds
+     *
+     * @return string
+     */
+    private function formatBound($seconds)
+    {
+        return $this->format($seconds, true);
     }
 
     /**
@@ -1850,6 +2136,12 @@ final class BitBarRenderer
             if ($this->isStatisticSelected(BuildTimesConfig::statisticMedian)) {
                 $lines = array_merge($lines, $this->getSharedDailyStatisticLines($dailyData->medianTime, $dailyData->medianCount, Strings::ROW_DAILY_MEDIAN_BUILD_TIME));
             }
+        }
+
+        if ($this->data->showDistribution && $data !== null && !empty($data->distribution)) {
+            $lines[] = "";
+            $lines[] = Strings::ROW_DISTRIBUTION;
+            $lines = array_merge($lines, $this->getDistributionLines($data->distribution, Strings::SHARE_DISTRIBUTION_BUCKET, Config::DISTRIBUTION_SHARE_BAR, false));
         }
 
         $lines[] = "";
@@ -1926,6 +2218,16 @@ final class BitBarRenderer
         $mode = $add ? "add" : "set";
         return "| bash='" . __FILE__ . "' param1=config param2=statistic_toggle param3=$statistic param4=$mode refresh=true terminal=false";
     }
+
+    /**
+     * @param bool $shown Whether the action turns the distribution chart on or off
+     * @return string
+     */
+    private function getActionForDistribution($shown)
+    {
+        $state = $shown ? "on" : "off";
+        return "| bash='" . __FILE__ . "' param1=config param2=distribution_show param3=$state refresh=true terminal=false";
+    }
 }
 
 final class BuildTimesOutput
@@ -1958,6 +2260,8 @@ final class BuildTimesOutput
     var $selectedMachines = [];
     /** @var string[] - which statistics to show */
     var $selectedStatistics = [];
+    /** @var bool */
+    var $showDistribution = false;
     /** @var string - id of the machine the plugin currently runs on */
     var $currentMachineId = "";
     /** @var string - spec of the current machine */
@@ -1999,6 +2303,8 @@ final class BuildTimesData
     var $average;
     /** @var BuildTimesValues */
     var $median;
+    /** @var int[] Number of builds keyed by the upper bound of their duration bucket, in seconds */
+    var $distribution;
     /** @var DateTime */
     var $dataFrom;
     /** @var DateTime */
@@ -2506,6 +2812,10 @@ function processConfigChange($argv, $configFilePath, $machine)
                 $config->toggleStatistic($name, $mode === "add");
                 $config->save($configFilePath);
             }
+            break;
+        case "distribution_show":
+            $config->showDistribution = isset($argv[3]) && $argv[3] === "on";
+            $config->save($configFilePath);
             break;
     }
 }

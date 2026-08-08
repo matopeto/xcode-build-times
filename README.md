@@ -9,7 +9,8 @@ Have you ever wondered how much time a day you spend waiting for Xcode to do you
 ### Features
 
 - **Always in sight** - your build time sits right in the menu bar, no need to open anything
-- **Know where your time goes** - daily totals, averages, and all-time stats at a glance (hold `⌥ Option` to reveal the full horror)
+- **Know where your time goes** - daily totals, averages, medians, and all-time stats at a glance (hold `⌥ Option` to reveal the full horror)
+- **Pick your statistics** - choose averages, medians, or a chart of how your build times are spread, in `Settings` | `Statistics`
 - **Spot the failures** - separate success and fail breakdowns so you know what's costing you
 - **Filter what matters** - track only the workspaces, projects, or machines you care about
 - **Share the pain** - show your teammates just how long you've been waiting
@@ -24,7 +25,7 @@ So first install [SwiftBar](https://github.com/swiftbar/SwiftBar#how-to-get-swif
 
 On the first run, select a directory you wish to use as your plugin directory, for example `~/SwiftBarPlugins`.
 
-The plugin needs PHP 8.0 or newer. If you are using macOS Monterey or newer, you must install PHP, because it is not bundled in macOS anymore. E.g. from Homebrew: `brew install php` and you must have the path to `php` executable in PATH variable.
+The plugin needs PHP 8.3 or newer. If you are using macOS Monterey or newer, you must install PHP, because it is not bundled in macOS anymore. E.g. from Homebrew: `brew install php` and you must have the path to `php` executable in PATH variable.
 
 ### Plugin installation
 
@@ -80,7 +81,6 @@ You can find [more info about the refresh intervals in the xbar/SwiftBar documen
 
 A few things I might add — or might not:
 
-- **Merge on import** — pull in another Mac's build history instead of replacing your own.
 - **More filters** — filter by Xcode version, build, or success/fail, not just workspace, project, and machine.
 
 ## License
